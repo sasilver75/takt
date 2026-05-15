@@ -14,6 +14,16 @@ tracker:
     - Duplicate
 polling:
   interval_ms: 30000
+runtime:
+  kind: docker
+  docker:
+    image: symphony-codex-worker:latest
+    workspace_mount: /workspace
+    codex_home: ~/.codex
+    codex_home_mount: /root/.codex
+    mcp_host: host.docker.internal
+    mcp_bind_host: 0.0.0.0
+    add_host_gateway: true
 hooks:
   timeout_ms: 60000
   after_create: |

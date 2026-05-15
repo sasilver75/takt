@@ -1,15 +1,16 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { SymphonyConfig, CodexRuntimeEvent, GraphqlToolExecutor, Issue } from "../domain.js";
 import { SymphonyError, errorMessage } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
+import type { WorkerRuntimeLease } from "../runtime/workerRuntime.js";
 import { prepareLinearGraphqlMcp, type LinearGraphqlMcpBridgeConfig } from "./linearGraphqlMcp.js";
 
 type JsonObject = Record<string, unknown>;
 
 export type CodexClientOptions = {
   config: SymphonyConfig;
-  workspacePath: string;
+  runtime: WorkerRuntimeLease;
   logger: Logger;
   onEvent: (event: CodexRuntimeEvent) => void;
   linearTool?: GraphqlToolExecutor | null | undefined;
@@ -33,18 +34,14 @@ export class CodexAppServerClient {
   async start(): Promise<void> {
     const launch = await prepareLinearGraphqlMcp(
       this.options.config,
-      this.options.workspacePath,
+      this.options.runtime.runtimeWorkspacePath,
       this.options.issue ?? null,
       this.options.linearBridge ?? null
     );
     if (launch.configuredUrl) {
       this.emit("linear_graphql_mcp_configured", { message: this.options.config.codex.linear_graphql_mcp.server_name });
     }
-    this.child = spawn("bash", ["-lc", launch.command], {
-      cwd: this.options.workspacePath,
-      env: launch.env,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+    this.child = this.options.runtime.spawnAppServer(launch.command, launch.env);
     this.child.stderr.on("data", (chunk) => {
       this.options.logger.debug("codex stderr", { message: redactText(chunk.toString("utf8"), this.secretValues()).slice(0, 1200) });
     });
@@ -67,7 +64,7 @@ export class CodexAppServerClient {
 
   async startThread(): Promise<string> {
     const result = (await this.request("thread/start", {
-      cwd: this.options.workspacePath,
+      cwd: this.options.runtime.runtimeWorkspacePath,
       approvalPolicy: this.options.config.codex.approval_policy,
       sandbox: this.options.config.codex.thread_sandbox,
       serviceName: "symphony",
@@ -91,7 +88,7 @@ export class CodexAppServerClient {
     const result = (await this.request("turn/start", {
       threadId: this.threadId,
       input: [{ type: "text", text: input, text_elements: [] }],
-      cwd: this.options.workspacePath,
+      cwd: this.options.runtime.runtimeWorkspacePath,
       approvalPolicy: this.options.config.codex.approval_policy,
       sandboxPolicy: this.options.config.codex.turn_sandbox_policy
     }, this.options.config.codex.turn_timeout_ms)) as JsonObject;

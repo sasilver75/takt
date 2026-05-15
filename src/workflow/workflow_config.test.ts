@@ -41,14 +41,23 @@ describe("workflow loader and config", () => {
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(
       workflowPath,
-      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\nworkspace:\n  root: workspaces\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\n---\nbody`
+      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\nworkspace:\n  root: workspaces\nruntime:\n  kind: docker\n  docker:\n    image: symphony-codex-worker:test\n    codex_home: $CODEX_HOME_TEST\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\n---\nbody`
     );
-    const config = resolveConfig(await loadWorkflow(workflowPath), { LINEAR_TOKEN: "secret" });
+    const config = resolveConfig(await loadWorkflow(workflowPath), { LINEAR_TOKEN: "secret", CODEX_HOME_TEST: path.join(dir, ".codex") });
     expect(config.tracker.endpoint).toBe("https://api.linear.app/graphql");
     expect(config.tracker.api_key).toBe("secret");
     expect(config.workspace.root).toBe(path.join(dir, "workspaces"));
     expect(config.agent.max_concurrent_agents_by_state).toEqual({ todo: 2 });
     expect(config.codex.command).toBe("codex app-server --flag");
+    expect(config.runtime).toMatchObject({
+      kind: "docker",
+      docker: {
+        image: "symphony-codex-worker:test",
+        workspace_mount: "/workspace",
+        codex_home: path.join(dir, ".codex"),
+        mcp_host: "host.docker.internal"
+      }
+    });
     expect(() => validateDispatchConfig(config)).not.toThrow();
   });
 

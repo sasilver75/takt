@@ -40,6 +40,7 @@ const TOOL = {
 
 export type LinearGraphqlBridgeHandle = {
   url: string;
+  token?: string | undefined;
   close(): Promise<void>;
 };
 
@@ -47,6 +48,9 @@ export type LinearGraphqlBridgeStartOptions = {
   executor: GraphqlToolExecutor | null | undefined;
   issue: Issue;
   projectSlug: string | null;
+  bindHost?: string | undefined;
+  publicHost?: string | undefined;
+  bearerToken?: string | null | undefined;
   logger: Logger;
   onEvent: (event: CodexRuntimeEvent) => void;
   maxBodyBytes?: number;
@@ -56,6 +60,7 @@ export type LinearGraphqlBridgeRequest = {
   method: string;
   pathname: string;
   origin: string | null;
+  authorization?: string | null | undefined;
   body: string;
 };
 
@@ -67,13 +72,15 @@ export type LinearGraphqlBridgeResponse = {
 export async function startLinearGraphqlBridge(options: LinearGraphqlBridgeStartOptions): Promise<LinearGraphqlBridgeHandle | null> {
   if (!options.executor) return null;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const bindHost = options.bindHost ?? "127.0.0.1";
+  const publicHost = options.publicHost ?? bindHost;
   const server = createServer((request, response) => {
     void handleHttpRequest(request, response, options, maxBodyBytes);
   });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, bindHost, () => {
       server.off("error", reject);
       resolve();
     });
@@ -84,16 +91,17 @@ export async function startLinearGraphqlBridge(options: LinearGraphqlBridgeStart
     server.close();
     throw new Error("Linear GraphQL bridge did not bind to a TCP port");
   }
-  const url = `http://127.0.0.1:${address.port}${MCP_ENDPOINT}`;
+  const url = `http://${publicHost}:${address.port}${MCP_ENDPOINT}`;
   options.logger.info("linear graphql mcp bridge started", { issue_identifier: options.issue.identifier, bridge_url: url });
   options.onEvent({
     event: "linear_graphql_bridge_started",
     timestamp: new Date().toISOString(),
-    message: "loopback mcp bridge ready"
+    message: options.bearerToken ? "authenticated mcp bridge ready" : "loopback mcp bridge ready"
   });
 
   return {
     url,
+    ...(options.bearerToken ? { token: options.bearerToken } : {}),
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => {
@@ -106,10 +114,13 @@ export async function startLinearGraphqlBridge(options: LinearGraphqlBridgeStart
 
 export async function executeLinearGraphqlBridgeRequest(
   request: LinearGraphqlBridgeRequest,
-  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent">
+  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent" | "bearerToken">
 ): Promise<LinearGraphqlBridgeResponse> {
   if (request.pathname !== MCP_ENDPOINT) return response(404, rpcError(null, -32004, "Not found"));
   if (!isAllowedOrigin(request.origin)) return response(403, rpcError(null, -32003, "Forbidden origin"));
+  if (!isAllowedAuthorization(request.authorization ?? null, options.bearerToken ?? null)) {
+    return response(401, rpcError(null, -32001, "Unauthorized"));
+  }
   if (request.method === "GET" || request.method === "DELETE") return response(405, rpcError(null, -32005, "Method not allowed"));
   if (request.method !== "POST") return response(405, rpcError(null, -32005, "Method not allowed"));
   let payload: unknown;
@@ -216,6 +227,7 @@ async function handleHttpRequest(
         method: request.method ?? "GET",
         pathname: url.pathname,
         origin: request.headers.origin ?? null,
+        authorization: request.headers.authorization ?? null,
         body: requestBody
       },
       options
@@ -287,10 +299,15 @@ function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return true;
   try {
     const url = new URL(origin);
-    return url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname);
+    return url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]", "::1", "host.docker.internal"].includes(url.hostname);
   } catch {
     return false;
   }
+}
+
+function isAllowedAuthorization(header: string | null, bearerToken: string | null): boolean {
+  if (!bearerToken) return true;
+  return header === `Bearer ${bearerToken}`;
 }
 
 class BodyTooLargeError extends Error {

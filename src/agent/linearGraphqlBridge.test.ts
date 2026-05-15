@@ -123,6 +123,35 @@ describe("linear GraphQL loopback MCP bridge", () => {
       )
     ).resolves.toMatchObject({ statusCode: 202, body: null });
   });
+
+  test("requires bearer authorization when a bridge token is configured", async () => {
+    const executor: GraphqlToolExecutor = {
+      async executeGraphql() {
+        return { success: true, body: { ok: true } };
+      }
+    };
+    const options = {
+      executor,
+      issue: testIssue,
+      projectSlug: "gallatin-demo",
+      bearerToken: "bridge-token",
+      onEvent: () => undefined
+    };
+
+    await expect(
+      executeLinearGraphqlBridgeRequest(request("POST", "/mcp", { jsonrpc: "2.0", id: 1, method: "tools/list" }), options)
+    ).resolves.toMatchObject({ statusCode: 401, body: { error: { message: "Unauthorized" } } });
+
+    await expect(
+      executeLinearGraphqlBridgeRequest(
+        {
+          ...request("POST", "/mcp", { jsonrpc: "2.0", id: 2, method: "tools/list" }),
+          authorization: "Bearer bridge-token"
+        },
+        options
+      )
+    ).resolves.toMatchObject({ statusCode: 200, body: { id: 2, result: { tools: [{ name: "linear_graphql" }] } } });
+  });
 });
 
 function request(method: string, pathname: string, body: unknown) {

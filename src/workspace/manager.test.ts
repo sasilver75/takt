@@ -20,6 +20,7 @@ function config(root: string, hooks: Partial<SymphonyConfig["hooks"]> = {}): Sym
     },
     polling: { interval_ms: 1000 },
     workspace: { root },
+    runtime: { kind: "host" },
     hooks: { after_create: null, before_run: null, after_run: null, before_remove: null, timeout_ms: 1000, ...hooks },
     agent: { max_concurrent_agents: 1, max_turns: 1, max_retry_backoff_ms: 1000, max_concurrent_agents_by_state: {} },
     codex: {

@@ -7,8 +7,9 @@ import { appendMcpConfig, prepareLinearGraphqlMcp, sanitizedCodexEnv } from "./l
 
 describe("linear GraphQL MCP launch config", () => {
   test("appends a hosted Codex MCP server URL without embedding capabilities", () => {
-    const command = appendMcpConfig("codex app-server", "symphony_linear", "http://127.0.0.1:1234/mcp");
+    const command = appendMcpConfig("codex app-server", "symphony_linear", "http://127.0.0.1:1234/mcp", "SYMPHONY_LINEAR_MCP_TOKEN");
     expect(command).toContain("mcp_servers.symphony_linear.url");
+    expect(command).toContain("mcp_servers.symphony_linear.bearer_token_env_var");
     expect(command).toContain("http://127.0.0.1:1234/mcp");
     expect(command).not.toContain("mcp_servers.symphony_linear.args");
     expect(command).not.toContain("LINEAR_API_KEY");
@@ -25,7 +26,9 @@ describe("linear GraphQL MCP launch config", () => {
     );
 
     expect(launch.command).toContain("mcp_servers.symphony_linear.url");
+    expect(launch.command).toContain("mcp_servers.symphony_linear.bearer_token_env_var");
     expect(launch.command).not.toContain("test-capability-token");
+    expect(launch.env.SYMPHONY_LINEAR_MCP_TOKEN).toBe("test-capability-token");
     expect(launch.configuredUrl).toBe("http://127.0.0.1:1234/mcp");
     expect(await readdir(workspace)).toEqual([]);
     expect(launch.env.LINEAR_API_KEY).toBeUndefined();
@@ -66,6 +69,7 @@ function config(): SymphonyConfig {
     },
     polling: { interval_ms: 30_000 },
     workspace: { root: "/tmp/workspaces" },
+    runtime: { kind: "host" },
     hooks: {
       after_create: null,
       before_run: null,

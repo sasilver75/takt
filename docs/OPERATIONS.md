@@ -3,6 +3,7 @@
 ## Running
 
 ```bash
+docker build -f docker/codex-worker.Dockerfile -t symphony-codex-worker:latest .
 LINEAR_API_KEY=... pnpm dev ./WORKFLOW.md --port 8787
 ```
 
@@ -20,18 +21,28 @@ If reload fails, Symphony logs `workflow reload failed` and keeps using the last
 
 ## Safety Posture
 
-This implementation uses a high-trust default posture suitable for trusted local automation:
+This implementation treats Docker as the first-class worker runtime. `runtime.kind: docker` runs Codex app-server inside a per-issue container with the issue workspace mounted at `/workspace`; `runtime.kind: host` remains available for local debugging and deterministic tests.
+
+The default Docker worker image can be built with:
+
+```bash
+docker build -f docker/codex-worker.Dockerfile -t symphony-codex-worker:latest .
+```
+
+The current safety posture is:
 
 - Codex command execution and file-change approval requests are auto-approved for the session.
 - Codex user-input requests are not allowed to stall indefinitely; the client returns an empty response and records `turn_input_required`.
-- Workspace isolation is filesystem-scoped: every agent subprocess is launched in the per-issue workspace and workspace paths must remain under `workspace.root`.
+- Workspace isolation is runtime-scoped: every agent subprocess is launched in the per-issue workspace inside the selected runtime, and host workspace paths must remain under `workspace.root`.
 - Leave `workspace.root` unset unless there is a concrete deployment reason; the default temp-directory root avoids package-manager parent traversal into this repo.
-- Hook scripts are trusted repository configuration and run in the workspace directory with `hooks.timeout_ms`.
+- `after_create` and `before_remove` hooks are host workspace lifecycle hooks. `before_run` and `after_run` execute through the selected worker runtime, so Docker workflows install dependencies and write run evidence inside the same container filesystem view used by Codex.
 - Linear credentials are resolved from workflow config/env indirection, redacted from logs, and scrubbed from the Codex app-server child environment.
-- Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the `symphony_linear` MCP server. Symphony hosts that MCP server on a short-lived `127.0.0.1` Streamable HTTP endpoint and registers only its local URL with Codex; no Linear API key or bridge token is written into the worker workspace.
+- Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the `symphony_linear` MCP server. Symphony hosts that MCP server on a short-lived Streamable HTTP endpoint and registers only its runtime URL with Codex; no Linear API key or bridge token is written into the worker workspace. Docker workers use an MCP bearer-token env var rather than an argv or workspace-file secret.
+- Docker workers receive a runtime lease env including `SYMPHONY_RUN_ID`, `SYMPHONY_PORT_BASE`, `PORT`, `APP_PORT`, `VITE_PORT`, `DATABASE_PORT`, `REDIS_PORT`, `TMPDIR`, and `COMPOSE_PROJECT_NAME` to reduce port/service-name collisions.
+- The Docker image/build context excludes `keys.txt`, `.env*`, `node_modules`, `dist`, and `.git`.
 - `.symphony` is orchestrator-owned runtime wiring. Workers are instructed not to inspect it, print it, or commit it.
 
-For a more restrictive deployment, set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony under a dedicated OS/container/VM boundary with limited credentials.
+The configured `runtime.docker.codex_home` path is copied into an ephemeral per-run temp directory, then that copy is mounted read-write into the worker container so `codex app-server` can authenticate without mutating the host Codex home. The copy is deleted during runtime cleanup. Use a dedicated low-privilege Codex account/home for production factory runs. For a more restrictive deployment, also set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony itself under a dedicated OS/container/VM boundary with limited credentials.
 
 ## Observability
 
@@ -43,7 +54,7 @@ When the HTTP extension is enabled:
 - `GET /api/v1/state` returns running sessions, retry queue, token/runtime totals, and rate limits.
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
-- `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live local MCP bridge, and was used by a worker. Tracker secret values are redacted before event payloads are recorded.
+- `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live runtime-reachable MCP bridge, and was used by a worker. Tracker secret values and MCP bearer tokens are redacted before event payloads are recorded.
 
 ## Real Integration
 

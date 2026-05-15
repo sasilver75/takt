@@ -55,6 +55,7 @@ function config(root: string, command: string): SymphonyConfig {
     },
     polling: { interval_ms: 1000 },
     workspace: { root: path.join(root, "workspaces") },
+    runtime: { kind: "host" },
     hooks: { after_create: null, before_run: null, after_run: null, before_remove: null, timeout_ms: 1000 },
     agent: { max_concurrent_agents: 1, max_turns: 2, max_retry_backoff_ms: 1000, max_concurrent_agents_by_state: {} },
     codex: {

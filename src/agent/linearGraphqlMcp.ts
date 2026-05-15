@@ -1,10 +1,11 @@
 import type { Issue, SymphonyConfig } from "../domain.js";
 
 const SECRET_ENV_KEY = /(^|[_-])(token|secret|password|authorization|credential|pat)($|[_-])|api[_-]?key/i;
+const MCP_BEARER_ENV_VAR = "SYMPHONY_LINEAR_MCP_TOKEN";
 
 export type LinearGraphqlMcpBridgeConfig = {
   url: string;
-  token?: string;
+  token?: string | undefined;
 };
 
 export type LinearMcpLaunch = {
@@ -27,16 +28,18 @@ export async function prepareLinearGraphqlMcp(
   if (!config.codex.linear_graphql_mcp.enabled || !bridge) {
     return { command: config.codex.command, env, configuredUrl: null };
   }
+  if (bridge.token) env[MCP_BEARER_ENV_VAR] = bridge.token;
   return {
-    command: appendMcpConfig(config.codex.command, config.codex.linear_graphql_mcp.server_name, bridge.url),
+    command: appendMcpConfig(config.codex.command, config.codex.linear_graphql_mcp.server_name, bridge.url, bridge.token ? MCP_BEARER_ENV_VAR : null),
     env,
     configuredUrl: bridge.url
   };
 }
 
-export function appendMcpConfig(command: string, serverName: string, url: string): string {
+export function appendMcpConfig(command: string, serverName: string, url: string, bearerTokenEnvVar: string | null = null): string {
   const urlConfig = `mcp_servers.${serverName}.url=${JSON.stringify(url)}`;
-  return `${command} -c ${shellQuote(urlConfig)}`;
+  const authConfig = bearerTokenEnvVar ? ` -c ${shellQuote(`mcp_servers.${serverName}.bearer_token_env_var=${JSON.stringify(bearerTokenEnvVar)}`)}` : "";
+  return `${command} -c ${shellQuote(urlConfig)}${authConfig}`;
 }
 
 export function sanitizedCodexEnv(

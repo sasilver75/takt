@@ -17,6 +17,8 @@ export function resolveConfig(
   const tracker = objectAt(root, "tracker");
   const polling = objectAt(root, "polling");
   const workspace = objectAt(root, "workspace");
+  const runtime = objectAt(root, "runtime");
+  const dockerRuntime = objectAt(runtime, "docker");
   const hooks = objectAt(root, "hooks");
   const agent = objectAt(root, "agent");
   const codex = objectAt(root, "codex");
@@ -42,6 +44,7 @@ export function resolveConfig(
     workspace: {
       root: resolvePath(stringAt(workspace, "root") ?? path.join(os.tmpdir(), "symphony_workspaces"), workflowDir, env)
     },
+    runtime: runtimeConfigAt(runtime, dockerRuntime, workflowDir, env),
     hooks: {
       after_create: emptyToNull(stringAt(hooks, "after_create")),
       before_run: emptyToNull(stringAt(hooks, "before_run")),
@@ -87,6 +90,9 @@ export function validateDispatchConfig(config: SymphonyConfig): void {
   }
   if (!config.codex.command.trim()) {
     throw new SymphonyError("missing_codex_command", "codex.command must be present");
+  }
+  if (config.runtime.kind === "docker" && !config.runtime.docker.image.trim()) {
+    throw new SymphonyError("missing_runtime_image", "runtime.docker.image must be present when runtime.kind is docker");
   }
 }
 
@@ -163,6 +169,67 @@ function concurrencyMapAt(root: Record<string, unknown>, key: string): Record<st
   const out: Record<string, number> = {};
   for (const [state, limit] of Object.entries(value)) {
     if (Number.isInteger(limit) && Number(limit) > 0) out[normalizeState(state)] = Number(limit);
+  }
+  return out;
+}
+
+function runtimeConfigAt(
+  runtime: Record<string, unknown>,
+  docker: Record<string, unknown>,
+  workflowDir: string,
+  env: ConfigEnvironment
+): SymphonyConfig["runtime"] {
+  const kind = stringAt(runtime, "kind") ?? "docker";
+  if (kind === "host") return { kind: "host" };
+  if (kind !== "docker") throw new SymphonyError("invalid_config_value", "runtime.kind must be host or docker");
+  return {
+    kind: "docker",
+    docker: {
+      image: stringAt(docker, "image") ?? "symphony-codex-worker:latest",
+      workspace_mount: absoluteContainerPathAt(docker, "workspace_mount", "/workspace"),
+      codex_home: optionalResolvedPathAt(docker, "codex_home", path.join(os.homedir(), ".codex"), workflowDir, env),
+      codex_home_mount: absoluteContainerPathAt(docker, "codex_home_mount", "/root/.codex"),
+      mcp_host: stringAt(docker, "mcp_host") ?? "host.docker.internal",
+      mcp_bind_host: stringAt(docker, "mcp_bind_host") ?? "0.0.0.0",
+      add_host_gateway: booleanAt(docker, "add_host_gateway", true),
+      network: emptyToNull(stringAt(docker, "network")),
+      memory: emptyToNull(stringAt(docker, "memory")),
+      cpus: emptyToNull(stringAt(docker, "cpus")),
+      extra_args: stringListAt(docker, "extra_args", []),
+      environment: stringMapAt(docker, "environment")
+    }
+  };
+}
+
+function absoluteContainerPathAt(root: Record<string, unknown>, key: string, fallback: string): string {
+  const value = stringAt(root, key) ?? fallback;
+  if (!value.startsWith("/")) throw new SymphonyError("invalid_config_value", `${key} must be an absolute container path`);
+  return value;
+}
+
+function optionalResolvedPathAt(
+  root: Record<string, unknown>,
+  key: string,
+  fallback: string | null,
+  workflowDir: string,
+  env: ConfigEnvironment
+): string | null {
+  const value = root[key];
+  if (value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return resolvePath(trimmed, workflowDir, env);
+  }
+  return fallback ? resolvePath(fallback, workflowDir, env) : null;
+}
+
+function stringMapAt(root: Record<string, unknown>, key: string): Record<string, string> {
+  const value = root[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    if (typeof entryValue === "string") out[entryKey] = entryValue;
   }
   return out;
 }

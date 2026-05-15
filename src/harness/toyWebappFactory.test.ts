@@ -142,6 +142,7 @@ function config(temp: string, workspaceRoot: string, command: string, toySource:
     },
     polling: { interval_ms: 60_000 },
     workspace: { root: workspaceRoot },
+    runtime: { kind: "host" },
     hooks: {
       after_create: `cp -R ${shellQuote(toySource)}/. .`,
       before_run: "printf before > .before-run",

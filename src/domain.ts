@@ -43,6 +43,7 @@ export type SymphonyConfig = {
   workspace: {
     root: string;
   };
+  runtime: RuntimeConfig;
   hooks: {
     after_create: string | null;
     before_run: string | null;
@@ -73,6 +74,30 @@ export type SymphonyConfig = {
     port: number | null;
     host: string;
   };
+};
+
+export type RuntimeConfig =
+  | {
+      kind: "host";
+    }
+  | {
+      kind: "docker";
+      docker: DockerRuntimeConfig;
+    };
+
+export type DockerRuntimeConfig = {
+  image: string;
+  workspace_mount: string;
+  codex_home: string | null;
+  codex_home_mount: string;
+  mcp_host: string;
+  mcp_bind_host: string;
+  add_host_gateway: boolean;
+  network: string | null;
+  memory: string | null;
+  cpus: string | null;
+  extra_args: string[];
+  environment: Record<string, string>;
 };
 
 export type Workspace = {
