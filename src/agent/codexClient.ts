@@ -191,6 +191,9 @@ export class CodexAppServerClient {
       } else if (method === "item/tool/requestUserInput") {
         result = { answers: {} };
         this.emit("turn_input_required", { message: "user input request failed by policy" });
+      } else if (method === "mcpServer/elicitation/request") {
+        result = { action: "accept", content: {}, _meta: null };
+        this.emit("mcp_elicitation_auto_accepted", { message: mcpElicitationMessage(message.params) });
       } else if (method === "item/tool/call") {
         result = await this.handleDynamicTool(message.params as JsonObject);
       } else {
@@ -324,6 +327,14 @@ function findAnyMcpToolCall(value: unknown): { server?: string; tool?: string; s
     if (found) return found;
   }
   return null;
+}
+
+function mcpElicitationMessage(params: unknown): string {
+  if (!params || typeof params !== "object") return "mcp elicitation";
+  const record = params as Record<string, unknown>;
+  const server = typeof record.serverName === "string" ? record.serverName : "unknown";
+  const mode = typeof record.mode === "string" ? record.mode : "unknown";
+  return `server=${server} mode=${mode}`;
 }
 
 function parseLinearToolArgs(value: unknown): { query: string; variables: Record<string, unknown> } {

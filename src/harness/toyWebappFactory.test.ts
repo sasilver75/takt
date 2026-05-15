@@ -67,6 +67,7 @@ describe("Symphony webapp production-factory harness", () => {
 
     expect(await readFile(path.join(workspace, ".mcp-argv"), "utf8")).toContain("mcp_servers.symphony_linear.args");
     expect(await readFile(path.join(workspace, ".mcp-env"), "utf8")).toBe("WEB-1");
+    expect(await readFile(path.join(workspace, ".mcp-elicitation"), "utf8")).toContain('"action":"accept"');
     expect(await readFile(path.join(workspace, ".base-instructions"), "utf8")).toContain("linear_graphql");
     expect(await readFile(path.join(workspace, ".before-run"), "utf8")).toContain("before");
     expect(await readFile(path.join(workspace, "src", "health.ts"), "utf8")).toContain("getHealth");
@@ -171,6 +172,8 @@ import path from "node:path";
 
 const rl = createInterface({ input: process.stdin });
 let startedTurn = false;
+let mcpAccepted = false;
+let linearToolCompleted = false;
 
 function send(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
@@ -226,10 +229,15 @@ function applyWebappPatch() {
 
 rl.on("line", (line) => {
   const msg = JSON.parse(line);
+  if (msg.id === "mcp-approval-1" && msg.result) {
+    mcpAccepted = msg.result.action === "accept";
+    writeFileSync(path.join(process.cwd(), ".mcp-elicitation"), JSON.stringify(msg.result));
+    maybeCompleteTurn();
+    return;
+  }
   if (msg.id === "tool-1" && msg.result) {
-    applyWebappPatch();
-    send({ method: "thread/tokenUsage/updated", params: { threadId: "thread-web", turnId: "turn-web-1", tokenUsage: { input_tokens: 111, output_tokens: 222, total_tokens: 333 } } });
-    send({ method: "turn/completed", params: { threadId: "thread-web", turn: { id: "turn-web-1", status: "completed", items: [], itemsView: "all", error: null, startedAt: 1, completedAt: 2, durationMs: 100 } } });
+    linearToolCompleted = true;
+    maybeCompleteTurn();
     return;
   }
   if (msg.method === "initialize") {
@@ -248,8 +256,16 @@ rl.on("line", (line) => {
     send({ id: msg.id, result: { turn: { id: "turn-web-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
     send({ method: "turn/started", params: { threadId: "thread-web", turn: { id: "turn-web-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
     send({ id: "approval-1", method: "item/commandExecution/requestApproval", params: { threadId: "thread-web" } });
+    send({ id: "mcp-approval-1", method: "mcpServer/elicitation/request", params: { threadId: "thread-web", turnId: "turn-web-1", serverName: "symphony_linear", mode: "form", message: "Allow linear_graphql", requestedSchema: { type: "object", properties: {} }, _meta: null } });
     send({ id: "tool-1", method: "item/tool/call", params: { threadId: "thread-web", tool: "linear_graphql", arguments: { query: "mutation UpdateIssue($id: ID!, $state: String!) { issueUpdate(id: $id, input: { state: $state }) { success } }", variables: { id: "toy-issue-1", state: "Human Review" } } } });
   }
 });
+
+function maybeCompleteTurn() {
+  if (!mcpAccepted || !linearToolCompleted) return;
+  applyWebappPatch();
+  send({ method: "thread/tokenUsage/updated", params: { threadId: "thread-web", turnId: "turn-web-1", tokenUsage: { input_tokens: 111, output_tokens: 222, total_tokens: 333 } } });
+  send({ method: "turn/completed", params: { threadId: "thread-web", turn: { id: "turn-web-1", status: "completed", items: [], itemsView: "all", error: null, startedAt: 1, completedAt: 2, durationMs: 100 } } });
+}
 `;
 }
