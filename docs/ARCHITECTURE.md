@@ -13,7 +13,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - Workspace execution boundary: `src/workspace/manager.ts`
   - Maps issue identifiers to sanitized workspace keys, enforces root containment, and runs lifecycle hooks with timeouts.
 - Agent execution: `src/agent/*`
-  - Launches `bash -lc <codex.command>` in the per-issue workspace, injects a workspace-local `symphony_linear` MCP server for `linear_graphql`, starts a short-lived loopback bridge back to the orchestrator-owned Linear executor, speaks app-server JSON-RPC over stdio, handles approvals/user input/tool calls by policy, and streams events upward.
+  - Launches `bash -lc <codex.command>` in the per-issue workspace, hosts a short-lived loopback Streamable HTTP MCP server for `symphony_linear`, registers its local URL with Codex for `linear_graphql`, speaks app-server JSON-RPC over stdio, handles approvals/user input/tool calls by policy, and streams events upward.
 - Coordination: `src/orchestrator/orchestrator.ts`
   - Owns mutable scheduler state, polling, dispatch, reconciliation, retry timers, token accounting, and runtime snapshots.
 - Observability and control: `src/observability/*`, `src/http/*`
@@ -26,8 +26,8 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - The orchestrator is the only owner of claim/running/retry state.
 - Agent subprocesses launch only with `cwd` equal to the per-issue workspace path.
 - Workspace paths must remain below the configured workspace root.
-- The Symphony Linear MCP script is generated into the issue workspace without embedding Linear credentials; it receives a per-run loopback bridge capability, while Linear auth stays inside the orchestrator-owned tracker adapter.
-- Bridge capabilities are short-lived, scoped to the per-run loopback server, and redacted from Symphony logs and status events. Workers are instructed to treat `.symphony` as orchestrator-owned wiring rather than task context.
+- The Symphony Linear MCP server is hosted by the orchestrator on `127.0.0.1`; Codex receives only a per-run local MCP URL, while Linear auth stays inside the orchestrator-owned tracker adapter.
+- Tracker secrets are removed from the Codex app-server environment and redacted from Symphony logs and status events. Workers are instructed to treat `.symphony` as orchestrator-owned wiring rather than task context.
 - Issue identifiers are sanitized before they become directory names.
 - Secrets are accepted through config/env resolution but never logged.
 - `WORKFLOW.md` changes are reloaded without restart; invalid reloads keep the last known good config.

@@ -17,8 +17,8 @@ const testIssue: Issue = {
   updated_at: null
 };
 
-describe("linear GraphQL loopback bridge", () => {
-  test("executes authorized GraphQL requests through the configured executor", async () => {
+describe("linear GraphQL loopback MCP bridge", () => {
+  test("serves MCP initialize, tools/list, and linear_graphql calls over HTTP", async () => {
     const events: CodexRuntimeEvent[] = [];
     const calls: unknown[] = [];
     const executor: GraphqlToolExecutor = {
@@ -27,25 +27,43 @@ describe("linear GraphQL loopback bridge", () => {
         return { success: true, body: { data: { viewer: { id: "viewer-id" } } } };
       }
     };
+    const options = {
+      executor,
+      issue: testIssue,
+      projectSlug: "gallatin-demo",
+      onEvent: (event: CodexRuntimeEvent) => events.push(event)
+    };
+
+    await expect(
+      executeLinearGraphqlBridgeRequest(
+        request("POST", "/mcp", { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } }),
+        options
+      )
+    ).resolves.toMatchObject({
+      statusCode: 200,
+      body: { id: 1, result: { capabilities: { tools: {} } } }
+    });
+
+    await expect(
+      executeLinearGraphqlBridgeRequest(request("POST", "/mcp", { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }), options)
+    ).resolves.toMatchObject({
+      statusCode: 200,
+      body: { id: 2, result: { tools: [{ name: "linear_graphql" }] } }
+    });
 
     const result = await executeLinearGraphqlBridgeRequest(
-      {
-        method: "POST",
-        pathname: "/linear_graphql",
-        authorization: "Bearer bridge-token",
-        body: JSON.stringify({ query: "query Viewer { viewer { id } }", variables: { issueId: "issue-id" } })
-      },
-      "bridge-token",
-      {
-        executor,
-        issue: testIssue,
-        projectSlug: "gallatin-demo",
-        onEvent: (event) => events.push(event)
-      }
+      request("POST", "/mcp", {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "linear_graphql", arguments: { query: "query Viewer { viewer { id } }", variables: { issueId: "issue-id" } } }
+      }),
+      options
     );
 
     expect(result.statusCode).toBe(200);
-    expect(result.body).toMatchObject({
+    expect(result.body).toMatchObject({ id: 3, result: { isError: false } });
+    expect(JSON.parse(String(((result.body?.result as any).content[0] as any).text))).toMatchObject({
       success: true,
       context: {
         project_slug: "gallatin-demo",
@@ -57,7 +75,7 @@ describe("linear GraphQL loopback bridge", () => {
     expect(events[0]?.message).not.toContain("Viewer");
   });
 
-  test("rejects unauthorized and malformed requests before reaching the executor", async () => {
+  test("rejects malformed requests before reaching the executor", async () => {
     const executor: GraphqlToolExecutor = {
       async executeGraphql() {
         throw new Error("executor should not be called");
@@ -72,18 +90,46 @@ describe("linear GraphQL loopback bridge", () => {
 
     await expect(
       executeLinearGraphqlBridgeRequest(
-        { method: "POST", pathname: "/linear_graphql", authorization: "Bearer wrong-token", body: "{}" },
-        "bridge-token",
+        {
+          method: "POST",
+          pathname: "/mcp",
+          origin: "https://evil.example",
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })
+        },
         options
       )
-    ).resolves.toMatchObject({ statusCode: 401, body: { success: false } });
+    ).resolves.toMatchObject({ statusCode: 403, body: { error: { message: "Forbidden origin" } } });
 
     await expect(
       executeLinearGraphqlBridgeRequest(
-        { method: "POST", pathname: "/linear_graphql", authorization: "Bearer bridge-token", body: "{\"query\":\"\"}" },
-        "bridge-token",
+        request("POST", "/mcp", {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "linear_graphql", arguments: { query: "" } }
+        }),
         options
       )
-    ).resolves.toMatchObject({ statusCode: 400, body: { success: false, error: "GraphQL query is required" } });
+    ).resolves.toMatchObject({ statusCode: 200, body: { result: { isError: true } } });
+
+    await expect(
+      executeLinearGraphqlBridgeRequest(
+        request("POST", "/mcp", {
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+          params: {}
+        }),
+        options
+      )
+    ).resolves.toMatchObject({ statusCode: 202, body: null });
   });
 });
+
+function request(method: string, pathname: string, body: unknown) {
+  return {
+    method,
+    pathname,
+    origin: null,
+    body: JSON.stringify(body)
+  };
+}

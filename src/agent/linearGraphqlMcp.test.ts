@@ -1,91 +1,111 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface } from "node:readline";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
-import { appendMcpConfig, linearGraphqlMcpServerSource } from "./linearGraphqlMcp.js";
+import { describe, expect, test } from "vitest";
+import type { Issue, SymphonyConfig } from "../domain.js";
+import { appendMcpConfig, prepareLinearGraphqlMcp, sanitizedCodexEnv } from "./linearGraphqlMcp.js";
 
-describe("linear GraphQL MCP bridge", () => {
-  const children: ChildProcessWithoutNullStreams[] = [];
-
-  afterEach(() => {
-    for (const child of children.splice(0)) child.kill("SIGTERM");
-  });
-
-  test("appends a Codex MCP server config without embedding credentials", () => {
-    const command = appendMcpConfig("codex app-server", "symphony_linear", "/tmp/work/.symphony/linear-graphql-mcp.mjs");
-    expect(command).toContain("mcp_servers.symphony_linear.command");
-    expect(command).toContain("mcp_servers.symphony_linear.args");
-    expect(command).toContain("/tmp/work/.symphony/linear-graphql-mcp.mjs");
+describe("linear GraphQL MCP launch config", () => {
+  test("appends a hosted Codex MCP server URL without embedding capabilities", () => {
+    const command = appendMcpConfig("codex app-server", "symphony_linear", "http://127.0.0.1:1234/mcp");
+    expect(command).toContain("mcp_servers.symphony_linear.url");
+    expect(command).toContain("http://127.0.0.1:1234/mcp");
+    expect(command).not.toContain("mcp_servers.symphony_linear.args");
     expect(command).not.toContain("LINEAR_API_KEY");
+    expect(command).not.toContain("test-capability-token");
   });
 
-  test("serves linear_graphql over MCP stdio and fails closed without a bridge", async () => {
-    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-mcp-"));
-    const scriptPath = path.join(temp, "linear-graphql-mcp.mjs");
-    await writeFile(scriptPath, linearGraphqlMcpServerSource(), { mode: 0o700 });
-    const child = spawn(process.execPath, [scriptPath], {
-      env: {
-        ...process.env,
-        SYMPHONY_LINEAR_BRIDGE_URL: "",
-        SYMPHONY_LINEAR_BRIDGE_TOKEN: "",
-        SYMPHONY_LINEAR_PROJECT_SLUG: "demo",
-        SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1"
+  test("prepares hosted MCP config without writing token-bearing workspace files", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-mcp-"));
+    const launch = await prepareLinearGraphqlMcp(
+      config(),
+      workspace,
+      issue(),
+      { url: "http://127.0.0.1:1234/mcp", token: "test-capability-token" }
+    );
+
+    expect(launch.command).toContain("mcp_servers.symphony_linear.url");
+    expect(launch.command).not.toContain("test-capability-token");
+    expect(launch.configuredUrl).toBe("http://127.0.0.1:1234/mcp");
+    expect(await readdir(workspace)).toEqual([]);
+    expect(launch.env.LINEAR_API_KEY).toBeUndefined();
+    expect(Object.values(launch.env)).not.toContain("local-secret");
+  });
+
+  test("sanitizes secret-looking app-server environment variables", () => {
+    const env = sanitizedCodexEnv(
+      {
+        PATH: "/usr/bin",
+        LINEAR_API_KEY: "local-secret",
+        GITHUB_TOKEN: "github-secret",
+        NORMAL_FLAG: "1",
+        WRAPPED: "before-local-secret-after"
       },
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    children.push(child);
-    const responses = createResponseReader(child);
+      config(),
+      { SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1" }
+    );
 
-    send(child, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } });
-    expect(await responses.next()).toMatchObject({ id: 1, result: { capabilities: { tools: {} } } });
-
-    send(child, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-    expect(await responses.next()).toMatchObject({ id: 2, result: { tools: [{ name: "linear_graphql" }] } });
-
-    send(child, {
-      jsonrpc: "2.0",
-      id: 3,
-      method: "tools/call",
-      params: { name: "linear_graphql", arguments: { query: "query Viewer { viewer { id } }", variables: { issueId: "SAM-1" } } }
-    });
-    const toolResult = await responses.next();
-    expect(toolResult).toMatchObject({ id: 3, result: { isError: true } });
-    expect(JSON.parse(toolResult.result.content[0].text)).toMatchObject({
-      success: false,
-      error: "Symphony Linear GraphQL bridge is unavailable"
-    });
-  });
-
-  test("generated MCP source contains no Linear credential plumbing", () => {
-    const source = linearGraphqlMcpServerSource({ url: "http://127.0.0.1:1234/linear_graphql", token: "bridge-token" });
-    expect(source).toContain("DEFAULT_BRIDGE_URL");
-    expect(source).toContain("linear_graphql");
-    expect(source).not.toContain("LINEAR_API_KEY");
-    expect(source).not.toContain("api.linear.app");
+    expect(env).toMatchObject({ PATH: "/usr/bin", NORMAL_FLAG: "1", SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1" });
+    expect(env.LINEAR_API_KEY).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.WRAPPED).toBeUndefined();
   });
 });
 
-function send(child: ChildProcessWithoutNullStreams, value: unknown): void {
-  child.stdin.write(`${JSON.stringify(value)}\n`);
+function config(): SymphonyConfig {
+  return {
+    workflowPath: "/tmp/WORKFLOW.md",
+    workflowDir: "/tmp",
+    tracker: {
+      kind: "linear",
+      endpoint: "https://api.linear.app/graphql",
+      api_key: "local-secret",
+      project_slug: "demo",
+      active_states: ["Todo"],
+      terminal_states: ["Done"]
+    },
+    polling: { interval_ms: 30_000 },
+    workspace: { root: "/tmp/workspaces" },
+    hooks: {
+      after_create: null,
+      before_run: null,
+      after_run: null,
+      before_remove: null,
+      timeout_ms: 60_000
+    },
+    agent: {
+      max_concurrent_agents: 1,
+      max_turns: 1,
+      max_retry_backoff_ms: 60_000,
+      max_concurrent_agents_by_state: {}
+    },
+    codex: {
+      command: "codex app-server",
+      approval_policy: null,
+      thread_sandbox: null,
+      turn_sandbox_policy: null,
+      turn_timeout_ms: 60_000,
+      read_timeout_ms: 1_000,
+      stall_timeout_ms: 1_000,
+      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+    },
+    server: { port: null, host: "127.0.0.1" }
+  };
 }
 
-function createResponseReader(child: ChildProcessWithoutNullStreams): { next: () => Promise<any> } {
-  const queue: unknown[] = [];
-  const waiters: Array<(value: unknown) => void> = [];
-  createInterface({ input: child.stdout }).on("line", (line) => {
-    const value = JSON.parse(line);
-    const waiter = waiters.shift();
-    if (waiter) waiter(value);
-    else queue.push(value);
-  });
+function issue(): Issue {
   return {
-    next: () =>
-      new Promise((resolve) => {
-        const value = queue.shift();
-        if (value) resolve(value);
-        else waiters.push(resolve);
-      })
+    id: "issue-id",
+    identifier: "SAM-1",
+    title: "Test",
+    description: null,
+    priority: null,
+    state: "Todo",
+    branch_name: null,
+    url: null,
+    labels: [],
+    blocked_by: [],
+    created_at: null,
+    updated_at: null
   };
 }

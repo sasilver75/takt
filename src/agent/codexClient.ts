@@ -37,7 +37,7 @@ export class CodexAppServerClient {
       this.options.issue ?? null,
       this.options.linearBridge ?? null
     );
-    if (launch.scriptPath) {
+    if (launch.configuredUrl) {
       this.emit("linear_graphql_mcp_configured", { message: this.options.config.codex.linear_graphql_mcp.server_name });
     }
     this.child = spawn("bash", ["-lc", launch.command], {
@@ -75,8 +75,8 @@ export class CodexAppServerClient {
       baseInstructions: [
         "You are running under Symphony, an automated software production orchestrator.",
         this.options.config.codex.linear_graphql_mcp.enabled
-          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads, comments, and issue state changes. Do not use other Linear integrations, do not use raw Linear credentials from disk, and do not inspect .symphony harness internals.`
-          : "Use only workflow-approved tools for Linear handoff, never read raw Linear credentials from disk, and do not inspect .symphony harness internals."
+          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads, comments, and issue state changes. Do not use other Linear integrations, do not use raw Linear credentials from disk, and do not inspect Symphony harness internals.`
+          : "Use only workflow-approved tools for Linear handoff, never read raw Linear credentials from disk, and do not inspect Symphony harness internals."
       ].join("\n")
     })) as JsonObject;
     const thread = result.thread as JsonObject | undefined;
@@ -277,7 +277,9 @@ export class CodexAppServerClient {
   }
 
   private secretValues(): string[] {
-    return [this.options.linearBridge?.token].filter((value): value is string => typeof value === "string" && value.length > 8);
+    return [this.options.linearBridge?.token, this.options.config.tracker.api_key].filter(
+      (value): value is string => typeof value === "string" && value.length > 8
+    );
   }
 }
 

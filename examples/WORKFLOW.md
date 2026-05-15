@@ -47,12 +47,12 @@ Attempt: {{ attempt }}
 
 Use the repository-local instructions, inspect the code before editing, implement the issue completely, run focused verification, and leave a concise handoff in Linear using the available tools. When work is ready for review, move the issue to `Needs Human`.
 
-Use Symphony's `linear_graphql` tool from the `symphony_linear` MCP server for all Linear reads, comments, and state changes. Do not use other Linear tools, and do not read raw Linear credentials from disk. Do not inspect `.symphony` harness internals. If `linear_graphql` is unavailable, leave repo-local handoff evidence and report that blocker instead of switching to an ambient Linear integration.
+Use Symphony's `linear_graphql` tool from the `symphony_linear` MCP server for all Linear reads, comments, and state changes. Do not use other Linear tools, and do not read raw Linear credentials from disk. Do not inspect Symphony harness internals. If `linear_graphql` is unavailable, leave repo-local handoff evidence and report that blocker instead of switching to an ambient Linear integration.
 
 Safety requirements:
 
 - Do not print or commit secrets.
 - Keep all commands inside this issue workspace.
-- Treat `.symphony` as orchestrator-owned runtime wiring, not implementation context.
+- Treat Symphony runtime wiring as orchestrator-owned, not implementation context.
 - Prefer small commits and clear verification evidence.
 - If the issue should move to human review, make the handoff explicit.

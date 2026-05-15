@@ -27,8 +27,8 @@ This implementation uses a high-trust default posture suitable for trusted local
 - Workspace isolation is filesystem-scoped: every agent subprocess is launched in the per-issue workspace and workspace paths must remain under `workspace.root`.
 - Leave `workspace.root` unset unless there is a concrete deployment reason; the default temp-directory root avoids package-manager parent traversal into this repo.
 - Hook scripts are trusted repository configuration and run in the workspace directory with `hooks.timeout_ms`.
-- Linear credentials are resolved from workflow config/env indirection and are redacted from logs.
-- Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the generated `symphony_linear` MCP server. The generated MCP script is written to `.symphony/linear-graphql-mcp.mjs` inside the issue workspace and receives only a short-lived loopback bridge capability. The Linear API key remains in the Symphony orchestrator process, and the bridge capability is redacted from Symphony event logs.
+- Linear credentials are resolved from workflow config/env indirection, redacted from logs, and scrubbed from the Codex app-server child environment.
+- Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the `symphony_linear` MCP server. Symphony hosts that MCP server on a short-lived `127.0.0.1` Streamable HTTP endpoint and registers only its local URL with Codex; no Linear API key or bridge token is written into the worker workspace.
 - `.symphony` is orchestrator-owned runtime wiring. Workers are instructed not to inspect it, print it, or commit it.
 
 For a more restrictive deployment, set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony under a dedicated OS/container/VM boundary with limited credentials.
@@ -43,7 +43,7 @@ When the HTTP extension is enabled:
 - `GET /api/v1/state` returns running sessions, retry queue, token/runtime totals, and rate limits.
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
-- `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live local bridge, and was used by a worker. Bridge capability material is redacted before event payloads are recorded.
+- `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live local MCP bridge, and was used by a worker. Tracker secret values are redacted before event payloads are recorded.
 
 ## Real Integration
 

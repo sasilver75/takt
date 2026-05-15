@@ -1,15 +1,45 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { CodexRuntimeEvent, GraphqlToolExecutor, Issue } from "../domain.js";
 import { errorMessage } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
+import { validateSingleOperation } from "../tracker/linear.js";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+const MCP_ENDPOINT = "/mcp";
+const TOOL = {
+  name: "linear_graphql",
+  description: [
+    "Execute exactly one Linear GraphQL query or mutation using Symphony's configured tracker credential.",
+    "Use this for Linear issue comments, state transitions, project-scoped reads, and handoff updates.",
+    "Do not read Linear tokens from disk."
+  ].join(" "),
+  inputSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["query"],
+    properties: {
+      query: {
+        type: "string",
+        description: "A single Linear GraphQL query or mutation document."
+      },
+      variables: {
+        type: "object",
+        description: "Optional GraphQL variables object.",
+        additionalProperties: true
+      }
+    }
+  },
+  annotations: {
+    title: "Linear GraphQL",
+    readOnlyHint: false,
+    destructiveHint: true,
+    openWorldHint: false
+  }
+};
 
 export type LinearGraphqlBridgeHandle = {
   url: string;
-  token: string;
   close(): Promise<void>;
 };
 
@@ -25,21 +55,20 @@ export type LinearGraphqlBridgeStartOptions = {
 export type LinearGraphqlBridgeRequest = {
   method: string;
   pathname: string;
-  authorization: string | null;
+  origin: string | null;
   body: string;
 };
 
 export type LinearGraphqlBridgeResponse = {
   statusCode: number;
-  body: Record<string, unknown>;
+  body: Record<string, unknown> | null;
 };
 
 export async function startLinearGraphqlBridge(options: LinearGraphqlBridgeStartOptions): Promise<LinearGraphqlBridgeHandle | null> {
   if (!options.executor) return null;
-  const token = randomBytes(32).toString("base64url");
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const server = createServer((request, response) => {
-    void handleHttpRequest(request, response, token, options, maxBodyBytes);
+    void handleHttpRequest(request, response, options, maxBodyBytes);
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -55,17 +84,16 @@ export async function startLinearGraphqlBridge(options: LinearGraphqlBridgeStart
     server.close();
     throw new Error("Linear GraphQL bridge did not bind to a TCP port");
   }
-  const url = `http://127.0.0.1:${address.port}/linear_graphql`;
-  options.logger.info("linear graphql bridge started", { issue_identifier: options.issue.identifier, bridge_url: url });
+  const url = `http://127.0.0.1:${address.port}${MCP_ENDPOINT}`;
+  options.logger.info("linear graphql mcp bridge started", { issue_identifier: options.issue.identifier, bridge_url: url });
   options.onEvent({
     event: "linear_graphql_bridge_started",
     timestamp: new Date().toISOString(),
-    message: "loopback bridge ready"
+    message: "loopback mcp bridge ready"
   });
 
   return {
     url,
-    token,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => {
@@ -78,50 +106,105 @@ export async function startLinearGraphqlBridge(options: LinearGraphqlBridgeStart
 
 export async function executeLinearGraphqlBridgeRequest(
   request: LinearGraphqlBridgeRequest,
-  token: string,
   options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent">
 ): Promise<LinearGraphqlBridgeResponse> {
-  if (request.pathname !== "/linear_graphql") return response(404, { success: false, error: "Not found" });
-  if (request.method !== "POST") return response(405, { success: false, error: "Method not allowed" });
-  if (!isAuthorized(request.authorization, token)) return response(401, { success: false, error: "Unauthorized" });
-  if (!options.executor) return response(503, { success: false, error: "Linear GraphQL executor is unavailable" });
-
+  if (request.pathname !== MCP_ENDPOINT) return response(404, rpcError(null, -32004, "Not found"));
+  if (!isAllowedOrigin(request.origin)) return response(403, rpcError(null, -32003, "Forbidden origin"));
+  if (request.method === "GET" || request.method === "DELETE") return response(405, rpcError(null, -32005, "Method not allowed"));
+  if (request.method !== "POST") return response(405, rpcError(null, -32005, "Method not allowed"));
   let payload: unknown;
   try {
     payload = JSON.parse(request.body);
   } catch {
-    return response(400, { success: false, error: "Request body must be JSON" });
+    return response(400, rpcError(null, -32700, "Parse error"));
   }
-  if (!payload || typeof payload !== "object") return response(400, { success: false, error: "Request body must be an object" });
-  const data = payload as Record<string, unknown>;
-  const query = data.query;
-  const variables = data.variables ?? {};
-  if (typeof query !== "string" || !query.trim()) return response(400, { success: false, error: "GraphQL query is required" });
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return response(400, rpcError(null, -32600, "Invalid Request"));
+  }
+  const message = payload as Record<string, unknown>;
+  if (message.id === undefined) {
+    if (typeof message.method === "string" || message.result !== undefined || message.error !== undefined) return response(202, null);
+    return response(400, rpcError(null, -32600, "Invalid Request"));
+  }
+  const result = await handleMcpRequest(message, options);
+  return response(200, result);
+}
+
+async function handleMcpRequest(
+  message: Record<string, unknown>,
+  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent">
+): Promise<Record<string, unknown>> {
+  const id = message.id;
+  const method = message.method;
+  if (method === "initialize") {
+    return rpcResult(id, {
+      protocolVersion: protocolVersion(message),
+      capabilities: { tools: {} },
+      serverInfo: { name: "symphony-linear", version: "0.1.0" }
+    });
+  }
+  if (method === "ping") return rpcResult(id, {});
+  if (method === "tools/list") return rpcResult(id, { tools: [TOOL] });
+  if (method === "tools/call") return rpcResult(id, await callTool(objectAt(message, "params"), options));
+  if (method === "resources/list") return rpcResult(id, { resources: [] });
+  if (method === "prompts/list") return rpcResult(id, { prompts: [] });
+  return rpcError(id, -32601, "Method not found");
+}
+
+async function callTool(
+  params: Record<string, unknown>,
+  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent">
+): Promise<Record<string, unknown>> {
+  if (params.name !== "linear_graphql") {
+    return toolResult({ success: false, error: `Unsupported tool: ${String(params.name || "")}` }, true);
+  }
+  if (!options.executor) return toolResult({ success: false, error: "Linear GraphQL executor is unavailable" }, true);
+  const args = params.arguments;
+  const query = typeof args === "string" ? args : objectAt(params, "arguments").query;
+  const variables = typeof args === "object" && args && !Array.isArray(args) ? objectAt(args as Record<string, unknown>, "variables") : {};
+  if (typeof query !== "string" || !query.trim()) {
+    return toolResult({ success: false, error: "linear_graphql query is required", context: contextPayload(options) }, true);
+  }
   if (!variables || typeof variables !== "object" || Array.isArray(variables)) {
-    return response(400, { success: false, error: "GraphQL variables must be an object" });
+    return toolResult({ success: false, error: "linear_graphql variables must be an object", context: contextPayload(options) }, true);
+  }
+  try {
+    validateSingleOperation(query);
+  } catch (error) {
+    return toolResult({ success: false, error: errorMessage(error), context: contextPayload(options) }, true);
   }
 
   const started = Date.now();
-  const result = await options.executor.executeGraphql(query, variables as Record<string, unknown>);
+  const result = await options.executor.executeGraphql(query, variables);
   options.onEvent({
     event: "linear_graphql_tool_call",
     timestamp: new Date().toISOString(),
-    message: `bridge success=${result.success} duration_ms=${Date.now() - started}`
+    message: `mcp_http success=${result.success} duration_ms=${Date.now() - started}`
   });
-  return response(200, {
+  return toolResult({
     ...result,
-    context: {
-      project_slug: options.projectSlug,
-      current_issue_id: options.issue.id,
-      current_issue_identifier: options.issue.identifier
-    }
-  });
+    context: contextPayload(options)
+  }, !result.success);
+}
+
+function contextPayload(options: Pick<LinearGraphqlBridgeStartOptions, "issue" | "projectSlug">): Record<string, string | null> {
+  return {
+    project_slug: options.projectSlug,
+    current_issue_id: options.issue.id,
+    current_issue_identifier: options.issue.identifier
+  };
+}
+
+function toolResult(payload: Record<string, unknown>, isError: boolean): Record<string, unknown> {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    isError
+  };
 }
 
 async function handleHttpRequest(
   request: IncomingMessage,
   responseWriter: ServerResponse,
-  token: string,
   options: LinearGraphqlBridgeStartOptions,
   maxBodyBytes: number
 ): Promise<void> {
@@ -132,10 +215,9 @@ async function handleHttpRequest(
       {
         method: request.method ?? "GET",
         pathname: url.pathname,
-        authorization: request.headers.authorization ?? null,
+        origin: request.headers.origin ?? null,
         body: requestBody
       },
-      token,
       options
     );
     writeJson(responseWriter, result.statusCode, result.body);
@@ -146,7 +228,7 @@ async function handleHttpRequest(
       issue_identifier: options.issue.identifier,
       error: errorMessage(error)
     });
-    writeJson(responseWriter, statusCode, { success: false, error: message });
+    writeJson(responseWriter, statusCode, rpcError(null, -32603, message));
   }
 }
 
@@ -169,21 +251,46 @@ function readBody(request: IncomingMessage, maxBodyBytes: number): Promise<strin
   });
 }
 
-function response(statusCode: number, body: Record<string, unknown>): LinearGraphqlBridgeResponse {
+function response(statusCode: number, body: Record<string, unknown> | null): LinearGraphqlBridgeResponse {
   return { statusCode, body };
 }
 
-function writeJson(responseWriter: ServerResponse, statusCode: number, body: Record<string, unknown>): void {
+function writeJson(responseWriter: ServerResponse, statusCode: number, body: Record<string, unknown> | null): void {
+  if (body === null) {
+    responseWriter.writeHead(statusCode);
+    responseWriter.end();
+    return;
+  }
   responseWriter.writeHead(statusCode, { "content-type": "application/json" });
   responseWriter.end(JSON.stringify(body));
 }
 
-function isAuthorized(header: string | null, token: string): boolean {
-  if (!header?.startsWith("Bearer ")) return false;
-  const candidate = header.slice("Bearer ".length);
-  const expected = Buffer.from(token);
-  const actual = Buffer.from(candidate);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
+function rpcResult(id: unknown, result: Record<string, unknown>): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function rpcError(id: unknown, code: number, message: string): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+function objectAt(root: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = root[key];
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function protocolVersion(message: Record<string, unknown>): string {
+  const params = objectAt(message, "params");
+  return typeof params.protocolVersion === "string" ? params.protocolVersion : "2025-03-26";
+}
+
+function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return true;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 class BodyTooLargeError extends Error {

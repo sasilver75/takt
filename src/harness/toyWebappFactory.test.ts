@@ -58,7 +58,7 @@ describe("Symphony webapp production-factory harness", () => {
       linearBridgeFactory: async ({ onEvent }) => {
         onEvent({ event: "linear_graphql_bridge_started", timestamp: new Date().toISOString(), message: "fake bridge ready" });
         return {
-          url: "http://127.0.0.1:1/linear_graphql",
+          url: "http://127.0.0.1:1/mcp",
           token: "test-capability-token",
           close: async () => undefined
         };
@@ -73,17 +73,17 @@ describe("Symphony webapp production-factory harness", () => {
     const workspace = workspaceManager.workspacePath("WEB-1");
     await waitFor(async () => (await readFile(path.join(workspace, ".after-run"), "utf8")).includes("after"), "after_run hook");
 
-    expect(await readFile(path.join(workspace, ".mcp-argv"), "utf8")).toContain("mcp_servers.symphony_linear.args");
+    expect(await readFile(path.join(workspace, ".mcp-argv"), "utf8")).toContain("mcp_servers.symphony_linear.url");
     expect(await readFile(path.join(workspace, ".mcp-env"), "utf8")).toBe("WEB-1");
-    const mcpScript = await readFile(path.join(workspace, ".mcp-script"), "utf8");
-    expect(mcpScript).toContain("DEFAULT_BRIDGE_URL");
-    expect(mcpScript).toContain("linear_graphql");
-    expect(mcpScript).not.toContain("local-secret");
-    expect(mcpScript).not.toContain("LINEAR_API_KEY");
+    const mcpArgv = await readFile(path.join(workspace, ".mcp-argv"), "utf8");
+    expect(mcpArgv).not.toContain("test-capability-token");
+    expect(mcpArgv).not.toContain("local-secret");
+    expect(mcpArgv).not.toContain("LINEAR_API_KEY");
+    expect(await readFile(path.join(workspace, ".mcp-script"), "utf8").catch(() => "")).toBe("");
     expect(await readFile(path.join(workspace, ".mcp-elicitation"), "utf8")).toContain('"action":"accept"');
     const baseInstructions = await readFile(path.join(workspace, ".base-instructions"), "utf8");
     expect(baseInstructions).toContain("linear_graphql");
-    expect(baseInstructions).toContain(".symphony harness internals");
+    expect(baseInstructions).toContain("Symphony harness internals");
     expect(await readFile(path.join(workspace, ".before-run"), "utf8")).toContain("before");
     expect(await readFile(path.join(workspace, "src", "health.ts"), "utf8")).toContain("getHealth");
     expect(await readFile(path.join(workspace, "src", "server.ts"), "utf8")).toContain("/api/health");
@@ -261,8 +261,6 @@ rl.on("line", (line) => {
   if (msg.method === "initialize") {
     const argv = process.argv.join("\\n");
     writeFileSync(path.join(process.cwd(), ".mcp-argv"), argv);
-    const scriptMatch = argv.match(/args=\\[\\"([^\\"]*linear-graphql-mcp\\.mjs)\\"\\]/);
-    if (scriptMatch) writeFileSync(path.join(process.cwd(), ".mcp-script"), readFileSync(scriptMatch[1], "utf8"));
     writeFileSync(path.join(process.cwd(), ".mcp-env"), process.env.SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER || "");
     send({ id: msg.id, result: { userAgent: "scripted-codex", codexHome: process.cwd(), platformFamily: "unix", platformOs: "test" } });
     return;
