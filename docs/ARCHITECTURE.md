@@ -30,7 +30,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - Workspace paths must remain below the configured workspace root.
 - The Symphony Linear MCP server is hosted by the orchestrator. Host workers receive a loopback URL; Docker workers receive a `host.docker.internal` URL plus a per-run bearer-token env-var reference. Linear auth stays inside the orchestrator-owned tracker adapter.
 - Tracker secrets are removed from the Codex app-server environment and redacted from Symphony logs and status events. Workers are instructed to treat `.symphony` as orchestrator-owned wiring rather than task context.
-- Docker workers mount only the per-issue workspace and an ephemeral per-run copy of the configured Codex home path. `keys.txt` is not mounted or copied into the image/build context.
+- Docker workers mount only the per-issue workspace and an ephemeral per-run Codex home containing auth material copied from the configured source. Operator plugin caches, app approvals, rollout state, shell history, `keys.txt`, and the repo root are not mounted or copied into the image/build context.
 - Issue identifiers are sanitized before they become directory names.
 - Secrets are accepted through config/env resolution but never logged.
 - `WORKFLOW.md` changes are reloaded without restart; invalid reloads keep the last known good config.

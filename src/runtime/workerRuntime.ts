@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Issue, SymphonyConfig, Workspace } from "../domain.js";
@@ -200,13 +200,17 @@ function runtimeEnv(issue: Issue, workspaceKey: string, hostWorkspacePath: strin
 function prepareEphemeralCodexHome(source: string | null, runtimeRoot: string): string | null {
   if (!source) return null;
   const target = path.join(runtimeRoot, "codex-home");
-  mkdirSync(runtimeRoot, { recursive: true, mode: 0o700 });
-  cpSync(source, target, {
-    recursive: true,
-    force: true,
-    errorOnExist: false
-  });
+  mkdirSync(target, { recursive: true, mode: 0o700 });
+  copyCodexHomeFile(source, target, "auth.json");
   return target;
+}
+
+function copyCodexHomeFile(source: string, target: string, relativePath: string): void {
+  const from = path.join(source, relativePath);
+  if (!existsSync(from)) return;
+  const to = path.join(target, relativePath);
+  mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 });
+  copyFileSync(from, to);
 }
 
 function stableIssueOffset(value: string): number {

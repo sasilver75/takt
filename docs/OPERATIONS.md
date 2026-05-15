@@ -42,7 +42,7 @@ The current safety posture is:
 - The Docker image/build context excludes `keys.txt`, `.env*`, `node_modules`, `dist`, and `.git`.
 - `.symphony` is orchestrator-owned runtime wiring. Workers are instructed not to inspect it, print it, or commit it.
 
-The configured `runtime.docker.codex_home` path is copied into an ephemeral per-run temp directory, then that copy is mounted read-write into the worker container so `codex app-server` can authenticate without mutating the host Codex home. The copy is deleted during runtime cleanup. Use a dedicated low-privilege Codex account/home for production factory runs. For a more restrictive deployment, also set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony itself under a dedicated OS/container/VM boundary with limited credentials.
+The configured `runtime.docker.codex_home` path is used only as an auth source. Symphony copies `auth.json` into an ephemeral per-run temp directory, mounts that minimal copy read-write into the worker container, and deletes it during runtime cleanup. It intentionally does not copy Codex plugin caches, marketplace config, app approvals, rollout state, or shell history, so workers do not inherit ambient Linear/GitHub/Vercel tools from the operator environment. Use a dedicated low-privilege Codex account/home for production factory runs. For a more restrictive deployment, also set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony itself under a dedicated OS/container/VM boundary with limited credentials.
 
 ## Observability
 

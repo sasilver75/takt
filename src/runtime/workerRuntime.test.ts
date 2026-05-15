@@ -34,8 +34,10 @@ describe("worker runtime", () => {
     const fakeBin = path.join(root, "bin");
     const logPath = path.join(root, "docker.log");
     const codexHome = path.join(root, "host-codex-home");
-    await mkdir(codexHome, { recursive: true });
+    await mkdir(path.join(codexHome, "plugins", "cache", "linear"), { recursive: true });
     await writeFile(path.join(codexHome, "auth.json"), "{}");
+    await writeFile(path.join(codexHome, "config.toml"), "[plugins.\"linear@openai-curated\"]\nenabled = true\n");
+    await writeFile(path.join(codexHome, "plugins", "cache", "linear", "SKILL.md"), "ambient linear skill");
     await writeFakeDocker(fakeBin, logPath);
     const workspace = await workspaceAt(root, "SAM-72");
     const runtime = createWorkerRuntime(config(root, fakeDockerImage(), codexHome), workspace, issue({ identifier: "SAM-72" }), createLogger(() => undefined));
@@ -56,6 +58,15 @@ describe("worker runtime", () => {
     expect(entry.argv.join("\n")).not.toContain(`source=${codexHome},target=/root/.codex`);
     expect(entry.argv.join("\n")).toContain("type=bind,source=");
     expect(entry.argv.join("\n")).toContain("target=/workspace");
+    const codexMountSource = entry.argv
+      .find((arg) => arg.includes("target=/root/.codex"))
+      ?.match(/source=([^,]+),target=\/root\/.codex/)?.[1];
+    expect(codexMountSource).toBeTruthy();
+    expect(await readFile(path.join(String(codexMountSource), "auth.json"), "utf8")).toBe("{}");
+    await expect(readFile(path.join(String(codexMountSource), "config.toml"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(path.join(String(codexMountSource), "plugins", "cache", "linear", "SKILL.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
     expect(entry.argv).toContain("host.docker.internal:host-gateway");
     expect(entry.argv).toContain(fakeDockerImage());
     expect(entry.env.SYMPHONY_LINEAR_MCP_TOKEN).toBe("secret-bridge-token");
