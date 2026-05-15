@@ -46,7 +46,7 @@ export class CodexAppServerClient {
       stdio: ["pipe", "pipe", "pipe"]
     });
     this.child.stderr.on("data", (chunk) => {
-      this.options.logger.debug("codex stderr", { message: chunk.toString("utf8").slice(0, 1200) });
+      this.options.logger.debug("codex stderr", { message: redactText(chunk.toString("utf8"), this.secretValues()).slice(0, 1200) });
     });
     this.child.on("exit", (code, signal) => {
       if (this.stopped) return;
@@ -75,8 +75,8 @@ export class CodexAppServerClient {
       baseInstructions: [
         "You are running under Symphony, an automated software production orchestrator.",
         this.options.config.codex.linear_graphql_mcp.enabled
-          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads, comments, and issue state changes. Do not use other Linear integrations, and do not use raw Linear credentials from disk.`
-          : "Use only workflow-approved tools for Linear handoff and never read raw Linear credentials from disk."
+          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads, comments, and issue state changes. Do not use other Linear integrations, do not use raw Linear credentials from disk, and do not inspect .symphony harness internals.`
+          : "Use only workflow-approved tools for Linear handoff, never read raw Linear credentials from disk, and do not inspect .symphony harness internals."
       ].join("\n")
     })) as JsonObject;
     const thread = result.thread as JsonObject | undefined;
@@ -242,7 +242,7 @@ export class CodexAppServerClient {
       session_id: sessionId,
       absolute_usage: usage,
       rate_limits: rateLimits,
-      raw: sanitizeNotificationRaw(method, params)
+      raw: sanitizeNotificationRaw(method, params, this.secretValues())
     });
     if (mcpToolCall) {
       this.emit("linear_graphql_tool_call", {
@@ -267,12 +267,17 @@ export class CodexAppServerClient {
   }
 
   private emit(event: string, extra: Partial<CodexRuntimeEvent>): void {
+    const safeExtra = redactSecrets(extra, this.secretValues()) as Partial<CodexRuntimeEvent>;
     this.options.onEvent({
       event,
       timestamp: new Date().toISOString(),
       codex_app_server_pid: this.pid,
-      ...extra
+      ...safeExtra
     });
+  }
+
+  private secretValues(): string[] {
+    return [this.options.linearBridge?.token].filter((value): value is string => typeof value === "string" && value.length > 8);
   }
 }
 
@@ -293,11 +298,11 @@ function numberFrom(value: unknown): number | null {
   return Number.isFinite(value) ? Number(value) : null;
 }
 
-function sanitizeNotificationRaw(method: string, params: JsonObject): unknown {
-  if (method !== "item/mcpToolCall/progress" && method !== "item/started" && method !== "item/completed") return params;
+function sanitizeNotificationRaw(method: string, params: JsonObject, secretValues: string[]): unknown {
+  if (method !== "item/mcpToolCall/progress" && method !== "item/started" && method !== "item/completed") return redactSecrets(params, secretValues);
   const toolCall = findAnyMcpToolCall(params);
-  if (!toolCall) return params;
-  return {
+  if (!toolCall) return redactSecrets(params, secretValues);
+  return redactSecrets({
     threadId: typeof params.threadId === "string" ? params.threadId : undefined,
     turnId: typeof params.turnId === "string" ? params.turnId : undefined,
     mcpToolCall: {
@@ -306,7 +311,23 @@ function sanitizeNotificationRaw(method: string, params: JsonObject): unknown {
       status: toolCall.status,
       success: toolCall.success
     }
-  };
+  }, secretValues);
+}
+
+function redactSecrets(value: unknown, secretValues: string[]): unknown {
+  if (secretValues.length === 0) return value;
+  if (typeof value === "string") return redactText(value, secretValues);
+  if (Array.isArray(value)) return value.map((entry) => redactSecrets(entry, secretValues));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) out[key] = redactSecrets(entry, secretValues);
+    return out;
+  }
+  return value;
+}
+
+function redactText(value: string, secretValues: string[]): string {
+  return secretValues.reduce((text, secret) => text.split(secret).join("[redacted]"), value);
 }
 
 function findLinearMcpToolCall(params: unknown, serverName: string): string | null {

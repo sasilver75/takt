@@ -81,7 +81,9 @@ describe("Symphony webapp production-factory harness", () => {
     expect(mcpScript).not.toContain("local-secret");
     expect(mcpScript).not.toContain("LINEAR_API_KEY");
     expect(await readFile(path.join(workspace, ".mcp-elicitation"), "utf8")).toContain('"action":"accept"');
-    expect(await readFile(path.join(workspace, ".base-instructions"), "utf8")).toContain("linear_graphql");
+    const baseInstructions = await readFile(path.join(workspace, ".base-instructions"), "utf8");
+    expect(baseInstructions).toContain("linear_graphql");
+    expect(baseInstructions).toContain(".symphony harness internals");
     expect(await readFile(path.join(workspace, ".before-run"), "utf8")).toContain("before");
     expect(await readFile(path.join(workspace, "src", "health.ts"), "utf8")).toContain("getHealth");
     expect(await readFile(path.join(workspace, "src", "server.ts"), "utf8")).toContain("/api/health");
@@ -111,6 +113,9 @@ describe("Symphony webapp production-factory harness", () => {
     expect(logs.some((line) => line.includes("approval_auto_approved"))).toBe(true);
     expect(logs.some((line) => line.includes("linear_graphql_tool_call"))).toBe(true);
     expect(logs.some((line) => line.includes("thread/tokenUsage/updated"))).toBe(true);
+    const logText = logs.join("\n");
+    expect(logText).not.toContain("test-capability-token");
+    expect(logText).toContain("[redacted]");
 
     await waitFor(() => (orchestrator.snapshot() as Snapshot).counts.retrying === 0, "continuation retry release");
     expect(orchestrator.issueSnapshot("WEB-1")).toMatchObject({ status: "completed" });
@@ -273,6 +278,7 @@ rl.on("line", (line) => {
     send({ method: "turn/started", params: { threadId: "thread-web", turn: { id: "turn-web-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
     send({ id: "approval-1", method: "item/commandExecution/requestApproval", params: { threadId: "thread-web" } });
     send({ id: "mcp-approval-1", method: "mcpServer/elicitation/request", params: { threadId: "thread-web", turnId: "turn-web-1", serverName: "symphony_linear", mode: "form", message: "Allow linear_graphql", requestedSchema: { type: "object", properties: {} }, _meta: null } });
+    send({ method: "item/completed", params: { threadId: "thread-web", turnId: "turn-web-1", item: { id: "leak-check", output: "bridge test-capability-token" } } });
     send({ id: "tool-1", method: "item/tool/call", params: { threadId: "thread-web", tool: "linear_graphql", arguments: { query: "mutation UpdateIssue($id: ID!, $state: String!) { issueUpdate(id: $id, input: { state: $state }) { success } }", variables: { id: "toy-issue-1", state: "Human Review" } } } });
   }
 });

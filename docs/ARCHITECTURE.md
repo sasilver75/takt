@@ -27,13 +27,14 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - Agent subprocesses launch only with `cwd` equal to the per-issue workspace path.
 - Workspace paths must remain below the configured workspace root.
 - The Symphony Linear MCP script is generated into the issue workspace without embedding Linear credentials; it receives a per-run loopback bridge capability, while Linear auth stays inside the orchestrator-owned tracker adapter.
+- Bridge capabilities are short-lived, scoped to the per-run loopback server, and redacted from Symphony logs and status events. Workers are instructed to treat `.symphony` as orchestrator-owned wiring rather than task context.
 - Issue identifiers are sanitized before they become directory names.
 - Secrets are accepted through config/env resolution but never logged.
 - `WORKFLOW.md` changes are reloaded without restart; invalid reloads keep the last known good config.
 
 ## Agent-First Harness Principles
 
-The implementation incorporates the OpenAI harness engineering guidance:
+The implementation incorporates OpenAI's [harness engineering guidance](https://openai.com/index/harness-engineering/) and the [Symphony orchestration spec announcement](https://openai.com/index/open-source-codex-orchestration-symphony/):
 
 - Keep repository-local docs and schemas as the system of record.
 - Make runtime state legible through logs and the HTTP snapshot API.
@@ -41,4 +42,4 @@ The implementation incorporates the OpenAI harness engineering guidance:
 - Encode safety/quality rules in tests and config validation instead of relying on operator memory.
 - Test the harness against a real app-shaped artifact, not only unit-level fakes.
 
-The OpenAI Symphony announcement frames this repo as a production-factory harness: Linear is the work queue, workspaces are isolated factories, Codex agents execute, and observability closes the feedback loop.
+The Symphony announcement frames this repo as a production-factory harness: Linear is the work queue, workspaces are isolated factories, Codex agents execute, and observability closes the feedback loop.

@@ -28,7 +28,8 @@ This implementation uses a high-trust default posture suitable for trusted local
 - Leave `workspace.root` unset unless there is a concrete deployment reason; the default temp-directory root avoids package-manager parent traversal into this repo.
 - Hook scripts are trusted repository configuration and run in the workspace directory with `hooks.timeout_ms`.
 - Linear credentials are resolved from workflow config/env indirection and are redacted from logs.
-- Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the generated `symphony_linear` MCP server. The generated MCP script is written to `.symphony/linear-graphql-mcp.mjs` inside the issue workspace and receives only a short-lived loopback bridge capability. The Linear API key remains in the Symphony orchestrator process.
+- Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the generated `symphony_linear` MCP server. The generated MCP script is written to `.symphony/linear-graphql-mcp.mjs` inside the issue workspace and receives only a short-lived loopback bridge capability. The Linear API key remains in the Symphony orchestrator process, and the bridge capability is redacted from Symphony event logs.
+- `.symphony` is orchestrator-owned runtime wiring. Workers are instructed not to inspect it, print it, or commit it.
 
 For a more restrictive deployment, set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony under a dedicated OS/container/VM boundary with limited credentials.
 
@@ -42,7 +43,7 @@ When the HTTP extension is enabled:
 - `GET /api/v1/state` returns running sessions, retry queue, token/runtime totals, and rate limits.
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
-- `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live local bridge, and was used by a worker.
+- `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live local bridge, and was used by a worker. Bridge capability material is redacted before event payloads are recorded.
 
 ## Real Integration
 
@@ -58,6 +59,7 @@ Live runs performed on May 15, 2026:
 - `SAM-66`, `Validate Symphony live run after GitHub source sync`: real Symphony cloned `origin/main` into an isolated temp workspace, Codex verified the checked-out repository contained the TypeScript implementation, ran `pnpm typecheck` and `pnpm test`, committed `LIVE_REMOTE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`.
 - `SAM-67`, `Validate Symphony-owned Linear GraphQL tool path`: real Codex discovered the generated `symphony_linear` MCP server and attempted `linear_graphql`; the run exposed that app-server MCP elicitation responses require an `{ action, content }` shape.
 - `SAM-68`, `Validate Symphony-owned Linear GraphQL tool path after elicitation fix`: real Codex reached the MCP tool after elicitation handling, then exposed that MCP subprocesses are not guaranteed to inherit the app-server process environment. Symphony now uses a loopback bridge so the MCP subprocess never needs the Linear API key.
+- `SAM-69`, `Validate Symphony Linear MCP loopback bridge`: real Codex cloned `origin/main` at `b386877867bc0a49a7cff830a0eb758c07e1a1d8`, discovered the generated `symphony_linear` MCP server, accepted MCP elicitation with the required shape, used `linear_graphql` through the loopback bridge for Linear reads/comment/state transition, ran `pnpm typecheck` and `pnpm test`, committed `LIVE_LINEAR_GRAPHQL_BRIDGE_RESULT.md` locally in the per-issue workspace, added the handoff comment, and moved the issue to `Needs Human`.
 
 Before production use:
 
