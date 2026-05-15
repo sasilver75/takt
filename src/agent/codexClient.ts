@@ -1,8 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { SymphonyConfig, CodexRuntimeEvent, GraphqlToolExecutor } from "../domain.js";
+import type { SymphonyConfig, CodexRuntimeEvent, GraphqlToolExecutor, Issue } from "../domain.js";
 import { SymphonyError, errorMessage } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
+import { prepareLinearGraphqlMcp } from "./linearGraphqlMcp.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -12,6 +13,7 @@ export type CodexClientOptions = {
   logger: Logger;
   onEvent: (event: CodexRuntimeEvent) => void;
   linearTool?: GraphqlToolExecutor | null | undefined;
+  issue?: Issue | null | undefined;
 };
 
 export class CodexAppServerClient {
@@ -28,8 +30,13 @@ export class CodexAppServerClient {
   }
 
   async start(): Promise<void> {
-    this.child = spawn("bash", ["-lc", this.options.config.codex.command], {
+    const launch = await prepareLinearGraphqlMcp(this.options.config, this.options.workspacePath, this.options.issue ?? null);
+    if (launch.scriptPath) {
+      this.emit("linear_graphql_mcp_configured", { message: this.options.config.codex.linear_graphql_mcp.server_name });
+    }
+    this.child = spawn("bash", ["-lc", launch.command], {
       cwd: this.options.workspacePath,
+      env: launch.env,
       stdio: ["pipe", "pipe", "pipe"]
     });
     this.child.stderr.on("data", (chunk) => {
@@ -59,7 +66,12 @@ export class CodexAppServerClient {
       sandbox: this.options.config.codex.thread_sandbox,
       serviceName: "symphony",
       ephemeral: false,
-      baseInstructions: "You are running under Symphony, an automated software production orchestrator."
+      baseInstructions: [
+        "You are running under Symphony, an automated software production orchestrator.",
+        this.options.config.codex.linear_graphql_mcp.enabled
+          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads, comments, and issue state changes. Do not use raw Linear credentials from disk.`
+          : "Use only workflow-approved tools for Linear handoff and never read raw Linear credentials from disk."
+      ].join("\n")
     })) as JsonObject;
     const thread = result.thread as JsonObject | undefined;
     const threadId = typeof thread?.id === "string" ? thread.id : null;
@@ -201,6 +213,7 @@ export class CodexAppServerClient {
       return { contentItems: [{ type: "inputText", text: "linear_graphql is unavailable for this session" }], success: false };
     }
     const result = await this.options.linearTool.executeGraphql(parsed.query, parsed.variables);
+    this.emit("linear_graphql_tool_call", { message: `dynamic success=${result.success}` });
     return { contentItems: [{ type: "inputText", text: JSON.stringify(result) }], success: result.success };
   }
 
@@ -213,14 +226,23 @@ export class CodexAppServerClient {
     const sessionId = threadId && turnId ? `${threadId}-${turnId}` : null;
     const usage = method === "thread/tokenUsage/updated" ? extractUsage(params.tokenUsage) : null;
     const rateLimits = method === "account/rateLimits/updated" ? params.rateLimits : undefined;
+    const mcpToolCall = findLinearMcpToolCall(params, this.options.config.codex.linear_graphql_mcp.server_name);
     this.emit(method, {
       thread_id: threadId,
       turn_id: turnId,
       session_id: sessionId,
       absolute_usage: usage,
       rate_limits: rateLimits,
-      raw: params
+      raw: sanitizeNotificationRaw(method, params)
     });
+    if (mcpToolCall) {
+      this.emit("linear_graphql_tool_call", {
+        thread_id: threadId,
+        turn_id: turnId,
+        session_id: sessionId,
+        message: mcpToolCall
+      });
+    }
     if (method === "turn/completed" && turnId) {
       const status = typeof turn?.status === "string" ? turn.status : "completed";
       const waiters = this.turnWaiters.get(turnId);
@@ -260,6 +282,48 @@ function extractUsage(value: unknown): { input_tokens?: number; output_tokens?: 
 
 function numberFrom(value: unknown): number | null {
   return Number.isFinite(value) ? Number(value) : null;
+}
+
+function sanitizeNotificationRaw(method: string, params: JsonObject): unknown {
+  if (method !== "item/mcpToolCall/progress" && method !== "item/started" && method !== "item/completed") return params;
+  const toolCall = findAnyMcpToolCall(params);
+  if (!toolCall) return params;
+  return {
+    threadId: typeof params.threadId === "string" ? params.threadId : undefined,
+    turnId: typeof params.turnId === "string" ? params.turnId : undefined,
+    mcpToolCall: {
+      server: toolCall.server,
+      tool: toolCall.tool,
+      status: toolCall.status,
+      success: toolCall.success
+    }
+  };
+}
+
+function findLinearMcpToolCall(params: unknown, serverName: string): string | null {
+  const toolCall = findAnyMcpToolCall(params);
+  if (!toolCall) return null;
+  if (toolCall.tool !== "linear_graphql") return null;
+  if (toolCall.server && toolCall.server !== serverName) return null;
+  return `mcp server=${toolCall.server ?? serverName} tool=linear_graphql status=${toolCall.status ?? "unknown"} success=${toolCall.success ?? "unknown"}`;
+}
+
+function findAnyMcpToolCall(value: unknown): { server?: string; tool?: string; status?: string; success?: boolean } | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.tool === "string" && (typeof record.server === "string" || record.type === "mcpToolCall")) {
+    return {
+      tool: record.tool,
+      ...(typeof record.server === "string" ? { server: record.server } : {}),
+      ...(typeof record.status === "string" ? { status: record.status } : {}),
+      ...(typeof record.success === "boolean" ? { success: record.success } : {})
+    };
+  }
+  for (const nested of Object.values(record)) {
+    const found = findAnyMcpToolCall(nested);
+    if (found) return found;
+  }
+  return null;
 }
 
 function parseLinearToolArgs(value: unknown): { query: string; variables: Record<string, unknown> } {

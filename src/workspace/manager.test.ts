@@ -29,7 +29,8 @@ function config(root: string, hooks: Partial<SymphonyConfig["hooks"]> = {}): Sym
       turn_sandbox_policy: null,
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
-      stall_timeout_ms: 1000
+      stall_timeout_ms: 1000,
+      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
     server: { port: null, host: "127.0.0.1" }
   };

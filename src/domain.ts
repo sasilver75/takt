@@ -64,6 +64,10 @@ export type SymphonyConfig = {
     turn_timeout_ms: number;
     read_timeout_ms: number;
     stall_timeout_ms: number;
+    linear_graphql_mcp: {
+      enabled: boolean;
+      server_name: string;
+    };
   };
   server: {
     port: number | null;

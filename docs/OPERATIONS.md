@@ -28,6 +28,7 @@ This implementation uses a high-trust default posture suitable for trusted local
 - Leave `workspace.root` unset unless there is a concrete deployment reason; the default temp-directory root avoids package-manager parent traversal into this repo.
 - Hook scripts are trusted repository configuration and run in the workspace directory with `hooks.timeout_ms`.
 - Linear credentials are resolved from workflow config/env indirection and are redacted from logs.
+- Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the generated `symphony_linear` MCP server. The generated MCP script is written to `.symphony/linear-graphql-mcp.mjs` inside the issue workspace and receives Linear auth only via environment variables.
 
 For a more restrictive deployment, set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony under a dedicated OS/container/VM boundary with limited credentials.
 
@@ -41,6 +42,7 @@ When the HTTP extension is enabled:
 - `GET /api/v1/state` returns running sessions, retry queue, token/runtime totals, and rate limits.
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
+- `linear_graphql_mcp_configured` and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured and used by a worker.
 
 ## Real Integration
 
@@ -54,6 +56,7 @@ Live runs performed on May 15, 2026:
 - `SAM-65`, `Validate Symphony live run on Gallatin Demo`: real Codex app-server ran through Symphony, created and locally committed `LIVE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`. This first run exposed two operator issues: the GitHub remote still contained the placeholder source, and an in-repo workspace root allowed package-manager parent traversal.
 - Corrections applied: pushed the TypeScript Symphony implementation to `origin/main` and returned the workflow to the default temp-directory workspace root.
 - `SAM-66`, `Validate Symphony live run after GitHub source sync`: real Symphony cloned `origin/main` into an isolated temp workspace, Codex verified the checked-out repository contained the TypeScript implementation, ran `pnpm typecheck` and `pnpm test`, committed `LIVE_REMOTE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`.
+- `SAM-67`, `Validate Symphony-owned Linear GraphQL tool path`: validates that live Codex uses the generated `symphony_linear` MCP server's `linear_graphql` tool for Linear handoff instead of relying on ambient Codex Linear tooling.
 
 Before production use:
 

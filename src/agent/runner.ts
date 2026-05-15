@@ -46,7 +46,8 @@ export class AgentRunHandle {
         workspacePath: workspace.path,
         logger: this.options.logger,
         onEvent: this.options.onEvent,
-        linearTool: this.options.linearTool
+        linearTool: this.options.linearTool,
+        issue: this.options.issue
       });
       this.client = client;
       await client.start();

@@ -22,7 +22,7 @@ Production workflows should keep secrets in environment variables and refer to t
 - `src/config`: typed config defaults, env indirection, validation, state normalization.
 - `src/tracker`: Linear GraphQL adapter and `linear_graphql` tool backend.
 - `src/workspace`: sanitized workspace paths, containment checks, lifecycle hooks.
-- `src/agent`: Codex app-server JSON-line client and agent runner.
+- `src/agent`: Codex app-server JSON-line client, generated `symphony_linear` MCP bridge, and agent runner.
 - `src/orchestrator`: polling, dispatch, reconciliation, retries, token/rate-limit accounting.
 - `src/http`: optional dashboard and `/api/v1/*` status/control endpoints.
 - `examples/toy-webapp`: frontend/backend TypeScript fixture used to exercise Symphony as a web-app production factory.
@@ -33,7 +33,7 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and [docs/OPERATIONS.md](./do
 
 The generated Codex protocol schemas and TypeScript bindings live under `schema/codex-app-server` and `src/codex/generated`. They are treated as local protocol reference artifacts. The runtime client uses the current app-server JSON-RPC line framing and sends `initialize`, `thread/start`, and `turn/start` requests with workspace-scoped `cwd`.
 
-The implementation follows the agent-first harness guidance in OpenAI’s harness engineering article and Symphony announcement: repository-local knowledge is the system of record, observability is exposed to agents/operators, and the workflow prompt remains versioned with the target repo.
+The implementation follows the agent-first harness guidance in OpenAI’s harness engineering article and Symphony announcement: repository-local knowledge is the system of record, observability is exposed to agents/operators, and the workflow prompt remains versioned with the target repo. Worker sessions get a Symphony-owned `linear_graphql` MCP tool so Linear handoff is portable and auditable rather than dependent on globally installed Codex plugins.
 
 ## Factory Harness
 

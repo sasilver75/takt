@@ -20,6 +20,7 @@ export function resolveConfig(
   const hooks = objectAt(root, "hooks");
   const agent = objectAt(root, "agent");
   const codex = objectAt(root, "codex");
+  const linearGraphqlMcp = objectAt(codex, "linear_graphql_mcp");
   const server = objectAt(root, "server");
   const workflowDir = path.dirname(workflow.path);
   const trackerKind = stringAt(tracker, "kind") ?? "linear";
@@ -61,7 +62,11 @@ export function resolveConfig(
       turn_sandbox_policy: valueAt(codex, "turn_sandbox_policy") ?? null,
       turn_timeout_ms: positiveIntegerAt(codex, "turn_timeout_ms", 3600000),
       read_timeout_ms: positiveIntegerAt(codex, "read_timeout_ms", 5000),
-      stall_timeout_ms: integerAt(codex, "stall_timeout_ms", 300000)
+      stall_timeout_ms: integerAt(codex, "stall_timeout_ms", 300000),
+      linear_graphql_mcp: {
+        enabled: booleanAt(linearGraphqlMcp, "enabled", true),
+        server_name: mcpServerNameAt(linearGraphqlMcp, "server_name", "symphony_linear")
+      }
     },
     server: {
       port: overrides.port ?? optionalIntegerAt(server, "port"),
@@ -113,6 +118,19 @@ function valueAt(root: Record<string, unknown>, key: string): unknown {
 function stringAt(root: Record<string, unknown>, key: string): string | null {
   const value = root[key];
   return typeof value === "string" ? value : null;
+}
+
+function booleanAt(root: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = root[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function mcpServerNameAt(root: Record<string, unknown>, key: string, fallback: string): string {
+  const value = stringAt(root, key) ?? fallback;
+  if (!/^[A-Za-z0-9_]+$/.test(value)) {
+    throw new SymphonyError("invalid_config_value", `${key} must contain only letters, numbers, and underscores`);
+  }
+  return value;
 }
 
 function stringListAt(root: Record<string, unknown>, key: string, fallback: string[]): string[] {

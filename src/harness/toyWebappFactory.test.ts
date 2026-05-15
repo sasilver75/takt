@@ -65,6 +65,9 @@ describe("Symphony webapp production-factory harness", () => {
     const workspace = workspaceManager.workspacePath("WEB-1");
     await waitFor(async () => (await readFile(path.join(workspace, ".after-run"), "utf8")).includes("after"), "after_run hook");
 
+    expect(await readFile(path.join(workspace, ".mcp-argv"), "utf8")).toContain("mcp_servers.symphony_linear.args");
+    expect(await readFile(path.join(workspace, ".mcp-env"), "utf8")).toBe("WEB-1");
+    expect(await readFile(path.join(workspace, ".base-instructions"), "utf8")).toContain("linear_graphql");
     expect(await readFile(path.join(workspace, ".before-run"), "utf8")).toContain("before");
     expect(await readFile(path.join(workspace, "src", "health.ts"), "utf8")).toContain("getHealth");
     expect(await readFile(path.join(workspace, "src", "server.ts"), "utf8")).toContain("/api/health");
@@ -92,6 +95,7 @@ describe("Symphony webapp production-factory harness", () => {
       workspace: { path: workspace }
     });
     expect(logs.some((line) => line.includes("approval_auto_approved"))).toBe(true);
+    expect(logs.some((line) => line.includes("linear_graphql_tool_call"))).toBe(true);
     expect(logs.some((line) => line.includes("thread/tokenUsage/updated"))).toBe(true);
 
     await waitFor(() => (orchestrator.snapshot() as Snapshot).counts.retrying === 0, "continuation retry release");
@@ -139,7 +143,8 @@ function config(temp: string, workspaceRoot: string, command: string, toySource:
       turn_sandbox_policy: null,
       turn_timeout_ms: 5000,
       read_timeout_ms: 1000,
-      stall_timeout_ms: 5000
+      stall_timeout_ms: 5000,
+      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
     server: { port: null, host: "127.0.0.1" }
   };
@@ -228,10 +233,13 @@ rl.on("line", (line) => {
     return;
   }
   if (msg.method === "initialize") {
+    writeFileSync(path.join(process.cwd(), ".mcp-argv"), process.argv.join("\\n"));
+    writeFileSync(path.join(process.cwd(), ".mcp-env"), process.env.SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER || "");
     send({ id: msg.id, result: { userAgent: "scripted-codex", codexHome: process.cwd(), platformFamily: "unix", platformOs: "test" } });
     return;
   }
   if (msg.method === "thread/start") {
+    writeFileSync(path.join(process.cwd(), ".base-instructions"), msg.params.baseInstructions || "");
     send({ id: msg.id, result: { thread: { id: "thread-web" }, cwd: process.cwd(), model: "scripted", modelProvider: "local", serviceTier: null, instructionSources: [], approvalPolicy: "never", approvalsReviewer: "client", sandbox: {}, reasoningEffort: null } });
     return;
   }

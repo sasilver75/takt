@@ -28,6 +28,9 @@ agent:
     Needs Human: 1
 codex:
   command: codex app-server
+  linear_graphql_mcp:
+    enabled: true
+    server_name: symphony_linear
   turn_timeout_ms: 3600000
   read_timeout_ms: 5000
   stall_timeout_ms: 300000
@@ -43,6 +46,8 @@ Current state: {{ issue.state }}
 Attempt: {{ attempt }}
 
 Use the repository-local instructions, inspect the code before editing, implement the issue completely, run focused verification, and leave a concise handoff in Linear using the available tools. When work is ready for review, move the issue to `Needs Human`.
+
+Use Symphony's `linear_graphql` tool from the `symphony_linear` MCP server for all Linear reads, comments, and state changes. Do not use other Linear tools unless `linear_graphql` is unavailable, and do not read raw Linear credentials from disk.
 
 Safety requirements:
 
