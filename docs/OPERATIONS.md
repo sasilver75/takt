@@ -10,6 +10,8 @@ The positional argument selects the workflow file. If omitted, Symphony uses `./
 
 `--port` enables the optional HTTP status surface and overrides `server.port` from workflow front matter. The server binds loopback by default.
 
+`examples/WORKFLOW.md` targets the real Linear project `Gallatin Demo` in the `Samcorp` team. Linear's generated project slug is `5f14e4e68dc4`; the team handoff state is `Needs Human`.
+
 ## Workflow Reload
 
 The service watches `WORKFLOW.md` and reloads config and prompt content without restart. Reloaded settings apply to future dispatch, retries, hooks, reconciliation, and agent launches. In-flight Codex sessions are not restarted just because config changed.
@@ -23,6 +25,7 @@ This implementation uses a high-trust default posture suitable for trusted local
 - Codex command execution and file-change approval requests are auto-approved for the session.
 - Codex user-input requests are not allowed to stall indefinitely; the client returns an empty response and records `turn_input_required`.
 - Workspace isolation is filesystem-scoped: every agent subprocess is launched in the per-issue workspace and workspace paths must remain under `workspace.root`.
+- Leave `workspace.root` unset unless there is a concrete deployment reason; the default temp-directory root avoids package-manager parent traversal into this repo.
 - Hook scripts are trusted repository configuration and run in the workspace directory with `hooks.timeout_ms`.
 - Linear credentials are resolved from workflow config/env indirection and are redacted from logs.
 
@@ -43,12 +46,19 @@ When the HTTP extension is enabled:
 
 The deterministic Vitest suite uses fake Linear/local tracker and fake Codex app-server harnesses. `pnpm test:factory` is the highest-signal local check: it copies `examples/toy-webapp` into an isolated workspace, lets a scripted app-server modify backend and frontend TypeScript, handles tool/approval requests, compiles the resulting app, and validates handoff status.
 
-Live Linear/Codex checks are intentionally not run by default because they require credentials, network access, and permission to execute real issue work.
+Live Linear/Codex checks are explicit operator actions because they require credentials, network access, and permission to touch real external systems.
+
+Live run performed on May 15, 2026:
+
+- Linear project: `Gallatin Demo` (`5f14e4e68dc4`).
+- Issue: `SAM-65`, `Validate Symphony live run on Gallatin Demo`.
+- Result: real Codex app-server ran through Symphony, created and locally committed `LIVE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`.
+- Observed follow-up: the GitHub remote must contain the current implementation before production runs, otherwise clone-based workspaces can start from an outdated repository.
 
 Before production use:
 
-- Run a real Linear smoke test against an isolated project.
-- Run Codex against a disposable issue/workspace.
+- Verify the configured Linear project exists and has the intended active issue queue.
+- Run Symphony against one controlled issue/workspace before allowing broader concurrency.
 - Verify hooks on the target host shell.
 - Confirm the chosen approval/sandbox policy matches the risk profile.
 

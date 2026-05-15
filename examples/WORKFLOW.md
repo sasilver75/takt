@@ -2,21 +2,18 @@
 tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
-  project_slug: gallatin-demo
+  project_slug: 5f14e4e68dc4
   active_states:
+    - Ready
     - Todo
     - In Progress
-    - Human Review
   terminal_states:
     - Done
-    - Closed
     - Cancelled
     - Canceled
     - Duplicate
 polling:
   interval_ms: 30000
-workspace:
-  root: .symphony/workspaces
 hooks:
   timeout_ms: 60000
   after_create: |
@@ -45,7 +42,7 @@ Issue URL: {{ issue.url }}
 Current state: {{ issue.state }}
 Attempt: {{ attempt }}
 
-Use the repository-local instructions, inspect the code before editing, implement the issue completely, run focused verification, and leave a concise handoff in the issue or PR using the available tools.
+Use the repository-local instructions, inspect the code before editing, implement the issue completely, run focused verification, and leave a concise handoff in Linear using the available tools. When work is ready for review, move the issue to `Needs Human`.
 
 Safety requirements:
 
