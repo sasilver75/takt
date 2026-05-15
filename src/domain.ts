@@ -121,6 +121,10 @@ export type TrackerClient = {
   fetchIssueStatesByIds(issueIds: string[]): Promise<Issue[]>;
 };
 
+export type GraphqlToolExecutor = {
+  executeGraphql(query: string, variables?: Record<string, unknown>): Promise<{ success: boolean; body?: unknown; error?: string }>;
+};
+
 export type RunningEntry = {
   issue: Issue;
   identifier: string;

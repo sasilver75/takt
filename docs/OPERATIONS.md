@@ -41,7 +41,9 @@ When the HTTP extension is enabled:
 
 ## Real Integration
 
-The deterministic Vitest suite uses fake Linear and fake Codex app-server harnesses. Live Linear/Codex checks are intentionally not run by default because they require credentials, network access, and permission to execute real issue work.
+The deterministic Vitest suite uses fake Linear/local tracker and fake Codex app-server harnesses. `pnpm test:factory` is the highest-signal local check: it copies `examples/toy-webapp` into an isolated workspace, lets a scripted app-server modify backend and frontend TypeScript, handles tool/approval requests, compiles the resulting app, and validates handoff status.
+
+Live Linear/Codex checks are intentionally not run by default because they require credentials, network access, and permission to execute real issue work.
 
 Before production use:
 
@@ -49,3 +51,11 @@ Before production use:
 - Run Codex against a disposable issue/workspace.
 - Verify hooks on the target host shell.
 - Confirm the chosen approval/sandbox policy matches the risk profile.
+
+## Verification Commands
+
+- `pnpm typecheck`: typechecks the Symphony service.
+- `pnpm test`: runs unit and deterministic integration tests.
+- `pnpm test:factory`: runs only the toy web-app production-factory harness.
+- `pnpm toy:typecheck`: typechecks the toy frontend/backend fixture.
+- `pnpm verify`: runs the full local gate used by CI.

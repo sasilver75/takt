@@ -18,6 +18,8 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
   - Owns mutable scheduler state, polling, dispatch, reconciliation, retry timers, token accounting, and runtime snapshots.
 - Observability and control: `src/observability/*`, `src/http/*`
   - Emits structured key/value logs and optionally exposes dashboard/API endpoints.
+- Deterministic factory harness: `src/harness/toyWebappFactory.test.ts`, `examples/toy-webapp`
+  - Builds a frontend/backend TypeScript app in an isolated workspace, drives a scripted app-server session, exercises approval/tool handling, and verifies the produced artifact.
 
 ## Invariants
 
@@ -36,5 +38,6 @@ The implementation incorporates the OpenAI harness engineering guidance:
 - Make runtime state legible through logs and the HTTP snapshot API.
 - Prefer typed boundaries and deterministic fakes over guessed external payloads.
 - Encode safety/quality rules in tests and config validation instead of relying on operator memory.
+- Test the harness against a real app-shaped artifact, not only unit-level fakes.
 
 The OpenAI Symphony announcement frames this repo as a production-factory harness: Linear is the work queue, workspaces are isolated factories, Codex agents execute, and observability closes the feedback loop.

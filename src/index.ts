@@ -8,3 +8,4 @@ export * from "./tracker/linear.js";
 export * from "./workspace/manager.js";
 export * from "./orchestrator/orchestrator.js";
 export * from "./observability/logger.js";
+export * from "./testing/localTracker.js";

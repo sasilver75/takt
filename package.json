@@ -10,8 +10,12 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
+    "test:factory": "vitest run src/harness/toyWebappFactory.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "toy:build": "tsc -p examples/toy-webapp/tsconfig.json",
+    "toy:typecheck": "tsc -p examples/toy-webapp/tsconfig.json --noEmit",
+    "verify": "pnpm typecheck && pnpm test && pnpm toy:typecheck && pnpm build && pnpm toy:build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "codex:generate": "codex app-server generate-ts --out src/codex/generated && codex app-server generate-json-schema --out schema/codex-app-server"
   },

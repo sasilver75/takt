@@ -116,6 +116,7 @@ function renderDashboard(snapshot: unknown): string {
     <div class="metrics">
       <div class="metric"><div>Running</div><div class="value">${state.counts?.running ?? 0}</div></div>
       <div class="metric"><div>Retrying</div><div class="value">${state.counts?.retrying ?? 0}</div></div>
+      <div class="metric"><div>Completed</div><div class="value">${(state.counts as { completed?: number } | undefined)?.completed ?? 0}</div></div>
       <div class="metric"><div>Total Tokens</div><div class="value">${state.codex_totals?.total_tokens ?? 0}</div></div>
       <div class="metric"><div>Runtime Seconds</div><div class="value">${Math.round(state.codex_totals?.seconds_running ?? 0)}</div></div>
     </div>

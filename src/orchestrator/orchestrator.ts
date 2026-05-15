@@ -2,6 +2,7 @@ import type {
   CodexRuntimeEvent,
   Issue,
   IssueDebugRecord,
+  GraphqlToolExecutor,
   RetryEntry,
   RuntimeEvent,
   RuntimeState,
@@ -15,7 +16,6 @@ import { isActiveState, isTerminalState, normalizeState } from "../config/config
 import type { Logger } from "../observability/logger.js";
 import { WorkspaceManager } from "../workspace/manager.js";
 import { AgentRunHandle } from "../agent/runner.js";
-import { LinearTrackerClient } from "../tracker/linear.js";
 
 export type OrchestratorOptions = {
   getConfig: () => SymphonyConfig;
@@ -24,7 +24,7 @@ export type OrchestratorOptions = {
   tracker: TrackerClient;
   workspaceManager: WorkspaceManager;
   logger: Logger;
-  linearTool?: LinearTrackerClient | null | undefined;
+  linearTool?: GraphqlToolExecutor | null | undefined;
 };
 
 export class Orchestrator {
@@ -138,7 +138,7 @@ export class Orchestrator {
     const activeSeconds = [...this.state.running.values()].reduce((sum, entry) => sum + (now - entry.started_at_ms) / 1000, 0);
     return {
       generated_at: new Date(now).toISOString(),
-      counts: { running: running.length, retrying: retrying.length },
+      counts: { running: running.length, retrying: retrying.length, completed: this.state.completed.size },
       running,
       retrying,
       codex_totals: {
@@ -157,7 +157,7 @@ export class Orchestrator {
     return {
       issue_identifier: identifier,
       issue_id: running?.issue.id ?? retry?.issue_id ?? record?.issue_id,
-      status: running ? "running" : retry ? "retrying" : "known",
+      status: running ? "running" : retry ? "retrying" : record && this.state.completed.has(record.issue_id) ? "completed" : "known",
       workspace: { path: running?.workspace_path ?? record?.workspace_path ?? null },
       attempts: {
         restart_count: record?.restart_count ?? 0,

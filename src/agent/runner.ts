@@ -1,11 +1,19 @@
-import type { Issue, RunResult, RunFailureReason, SymphonyConfig, WorkflowDefinition, CodexRuntimeEvent, TrackerClient } from "../domain.js";
+import type {
+  Issue,
+  RunResult,
+  RunFailureReason,
+  SymphonyConfig,
+  WorkflowDefinition,
+  CodexRuntimeEvent,
+  TrackerClient,
+  GraphqlToolExecutor
+} from "../domain.js";
 import { errorMessage, SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import { WorkspaceManager } from "../workspace/manager.js";
 import { continuationPrompt, renderIssuePrompt } from "../workflow/prompt.js";
 import { isActiveState } from "../config/config.js";
 import { CodexAppServerClient } from "./codexClient.js";
-import { LinearTrackerClient } from "../tracker/linear.js";
 
 export type AgentRunnerOptions = {
   issue: Issue;
@@ -16,7 +24,7 @@ export type AgentRunnerOptions = {
   tracker: TrackerClient;
   logger: Logger;
   onEvent: (event: CodexRuntimeEvent) => void;
-  linearTool?: LinearTrackerClient | null | undefined;
+  linearTool?: GraphqlToolExecutor | null | undefined;
 };
 
 export class AgentRunHandle {

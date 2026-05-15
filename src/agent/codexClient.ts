@@ -1,9 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { SymphonyConfig, CodexRuntimeEvent } from "../domain.js";
+import type { SymphonyConfig, CodexRuntimeEvent, GraphqlToolExecutor } from "../domain.js";
 import { SymphonyError, errorMessage } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
-import { LinearTrackerClient } from "../tracker/linear.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -12,7 +11,7 @@ export type CodexClientOptions = {
   workspacePath: string;
   logger: Logger;
   onEvent: (event: CodexRuntimeEvent) => void;
-  linearTool?: LinearTrackerClient | null | undefined;
+  linearTool?: GraphqlToolExecutor | null | undefined;
 };
 
 export class CodexAppServerClient {
