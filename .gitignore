@@ -1,0 +1,5 @@
+keys.txt
+node_modules/
+dist/
+.symphony/
+*.log

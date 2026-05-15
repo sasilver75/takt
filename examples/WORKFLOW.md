@@ -1,0 +1,55 @@
+---
+tracker:
+  kind: linear
+  api_key: $LINEAR_API_KEY
+  project_slug: gallatin-demo
+  active_states:
+    - Todo
+    - In Progress
+    - Human Review
+  terminal_states:
+    - Done
+    - Closed
+    - Cancelled
+    - Canceled
+    - Duplicate
+polling:
+  interval_ms: 30000
+workspace:
+  root: .symphony/workspaces
+hooks:
+  timeout_ms: 60000
+  after_create: |
+    git clone https://github.com/sasilver75/galatin-demo.git .
+  before_run: |
+    pnpm install --frozen-lockfile=false
+agent:
+  max_concurrent_agents: 2
+  max_turns: 20
+  max_retry_backoff_ms: 300000
+  max_concurrent_agents_by_state:
+    Human Review: 1
+codex:
+  command: codex app-server
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 5000
+  stall_timeout_ms: 300000
+server:
+  port: 8787
+---
+# Symphony Worker Prompt
+
+You are working on Linear issue `{{ issue.identifier }}: {{ issue.title }}`.
+
+Issue URL: {{ issue.url }}
+Current state: {{ issue.state }}
+Attempt: {{ attempt }}
+
+Use the repository-local instructions, inspect the code before editing, implement the issue completely, run focused verification, and leave a concise handoff in the issue or PR using the available tools.
+
+Safety requirements:
+
+- Do not print or commit secrets.
+- Keep all commands inside this issue workspace.
+- Prefer small commits and clear verification evidence.
+- If the issue should move to human review, make the handoff explicit.

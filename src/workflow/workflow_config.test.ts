@@ -1,0 +1,95 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, test } from "vitest";
+import { resolveConfig, validateDispatchConfig } from "../config/config.js";
+import { SymphonyError } from "../errors.js";
+import { renderIssuePrompt } from "./prompt.js";
+import { loadWorkflow, selectWorkflowPath } from "./loader.js";
+import { WorkflowRuntime } from "./runtime.js";
+import { issue } from "../testing/fakes.js";
+import { createLogger } from "../observability/logger.js";
+
+describe("workflow loader and config", () => {
+  test("selects explicit workflow path before cwd default", () => {
+    expect(selectWorkflowPath("custom.md", "/repo")).toBe(path.resolve("/repo/custom.md"));
+    expect(selectWorkflowPath(null, "/repo")).toBe(path.resolve("/repo/WORKFLOW.md"));
+  });
+
+  test("parses YAML front matter and prompt body", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(
+      workflowPath,
+      `---\ntracker:\n  kind: linear\n  project_slug: demo\n---\nHello {{ issue.identifier }}`
+    );
+    const workflow = await loadWorkflow(workflowPath);
+    expect(workflow.config.tracker).toEqual({ kind: "linear", project_slug: "demo" });
+    expect(workflow.prompt_template).toBe("Hello {{ issue.identifier }}");
+  });
+
+  test("returns typed loader errors", async () => {
+    await expect(loadWorkflow("/missing/WORKFLOW.md")).rejects.toMatchObject({ code: "missing_workflow_file" });
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(workflowPath, "---\n- nope\n---\nbody");
+    await expect(loadWorkflow(workflowPath)).rejects.toMatchObject({ code: "workflow_front_matter_not_a_map" });
+  });
+
+  test("applies defaults, env indirection, path expansion, and normalized per-state concurrency", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(
+      workflowPath,
+      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\nworkspace:\n  root: workspaces\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\n---\nbody`
+    );
+    const config = resolveConfig(await loadWorkflow(workflowPath), { LINEAR_TOKEN: "secret" });
+    expect(config.tracker.endpoint).toBe("https://api.linear.app/graphql");
+    expect(config.tracker.api_key).toBe("secret");
+    expect(config.workspace.root).toBe(path.join(dir, "workspaces"));
+    expect(config.agent.max_concurrent_agents_by_state).toEqual({ todo: 2 });
+    expect(config.codex.command).toBe("codex app-server --flag");
+    expect(() => validateDispatchConfig(config)).not.toThrow();
+  });
+
+  test("strict prompt rendering supports issue and attempt and rejects unknown variables", async () => {
+    const workflow = {
+      config: {},
+      prompt_template: "Work {{ issue.identifier }} attempt={{ attempt }}",
+      path: "/tmp/WORKFLOW.md",
+      loaded_at: new Date().toISOString()
+    };
+    await expect(renderIssuePrompt(workflow, issue({ identifier: "ABC-9" }), 3)).resolves.toContain("ABC-9 attempt=3");
+    await expect(renderIssuePrompt({ ...workflow, prompt_template: "{{ missing.value }}" }, issue(), null)).rejects.toMatchObject({
+      code: "template_render_error"
+    });
+  });
+
+  test("runtime reload keeps last good config after invalid change", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-runtime-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(workflowPath, "---\ntracker:\n  kind: linear\n  api_key: $TOKEN\n  project_slug: demo\npolling:\n  interval_ms: 25\n---\nbody");
+    const logs: string[] = [];
+    const runtime = new WorkflowRuntime({
+      workflowPath,
+      env: { TOKEN: "secret" },
+      logger: createLogger((line) => logs.push(line))
+    });
+    await runtime.start();
+    expect(runtime.getConfig().polling.interval_ms).toBe(25);
+    await writeFile(workflowPath, "---\ntracker:\n  kind: linear\npolling:\n  interval_ms: nope\n---\nbody");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(runtime.getConfig().polling.interval_ms).toBe(25);
+    expect(logs.some((line) => line.includes("workflow reload failed"))).toBe(true);
+    runtime.close();
+  });
+
+  test("dispatch validation rejects missing credentials without printing secrets", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(workflowPath, "---\ntracker:\n  kind: linear\n  api_key: $MISSING\n  project_slug: demo\n---\nbody");
+    const config = resolveConfig(await loadWorkflow(workflowPath), {});
+    expect(() => validateDispatchConfig(config)).toThrow(SymphonyError);
+    expect(() => validateDispatchConfig(config)).toThrow(/API key is missing/);
+  });
+});

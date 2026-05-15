@@ -1,0 +1,275 @@
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createInterface } from "node:readline";
+import type { SymphonyConfig, CodexRuntimeEvent } from "../domain.js";
+import { SymphonyError, errorMessage } from "../errors.js";
+import type { Logger } from "../observability/logger.js";
+import { LinearTrackerClient } from "../tracker/linear.js";
+
+type JsonObject = Record<string, unknown>;
+
+export type CodexClientOptions = {
+  config: SymphonyConfig;
+  workspacePath: string;
+  logger: Logger;
+  onEvent: (event: CodexRuntimeEvent) => void;
+  linearTool?: LinearTrackerClient | null | undefined;
+};
+
+export class CodexAppServerClient {
+  private child: ChildProcessWithoutNullStreams | null = null;
+  private nextId = 1;
+  private readonly pending = new Map<string | number, { resolve: (value: unknown) => void; reject: (error: unknown) => void; timer: NodeJS.Timeout }>();
+  private threadId: string | null = null;
+  private stopped = false;
+
+  constructor(private readonly options: CodexClientOptions) {}
+
+  get pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
+  async start(): Promise<void> {
+    this.child = spawn("bash", ["-lc", this.options.config.codex.command], {
+      cwd: this.options.workspacePath,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    this.child.stderr.on("data", (chunk) => {
+      this.options.logger.debug("codex stderr", { message: chunk.toString("utf8").slice(0, 1200) });
+    });
+    this.child.on("exit", (code, signal) => {
+      if (this.stopped) return;
+      const error = new SymphonyError("port_exit", `Codex app-server exited code=${code ?? "null"} signal=${signal ?? "null"}`);
+      for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(error);
+      }
+      this.pending.clear();
+      this.emit("turn_ended_with_error", { message: error.message });
+    });
+    createInterface({ input: this.child.stdout }).on("line", (line) => this.handleLine(line));
+    await this.request("initialize", {
+      clientInfo: { name: "symphony", title: "Symphony", version: "0.1.0" },
+      capabilities: { experimentalApi: true }
+    });
+  }
+
+  async startThread(): Promise<string> {
+    const result = (await this.request("thread/start", {
+      cwd: this.options.workspacePath,
+      approvalPolicy: this.options.config.codex.approval_policy,
+      sandbox: this.options.config.codex.thread_sandbox,
+      serviceName: "symphony",
+      ephemeral: false,
+      baseInstructions: "You are running under Symphony, an automated software production orchestrator."
+    })) as JsonObject;
+    const thread = result.thread as JsonObject | undefined;
+    const threadId = typeof thread?.id === "string" ? thread.id : null;
+    if (!threadId) throw new SymphonyError("response_error", "thread/start response did not include thread.id");
+    this.threadId = threadId;
+    return threadId;
+  }
+
+  async runTurn(input: string): Promise<{ turnId: string; status: string }> {
+    if (!this.threadId) throw new SymphonyError("response_error", "Thread has not been started");
+    const result = (await this.request("turn/start", {
+      threadId: this.threadId,
+      input: [{ type: "text", text: input, text_elements: [] }],
+      cwd: this.options.workspacePath,
+      approvalPolicy: this.options.config.codex.approval_policy,
+      sandboxPolicy: this.options.config.codex.turn_sandbox_policy
+    }, this.options.config.codex.turn_timeout_ms)) as JsonObject;
+    const turn = result.turn as JsonObject | undefined;
+    const turnId = typeof turn?.id === "string" ? turn.id : null;
+    if (!turnId) throw new SymphonyError("response_error", "turn/start response did not include turn.id");
+    this.emit("session_started", { thread_id: this.threadId, turn_id: turnId, session_id: `${this.threadId}-${turnId}` });
+    const completed = await this.waitForTurn(turnId);
+    return { turnId, status: completed };
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new SymphonyError("cancelled", "Codex client stopped"));
+    }
+    this.pending.clear();
+    this.child?.kill("SIGTERM");
+  }
+
+  private request(method: string, params: unknown, timeoutMs = this.options.config.codex.read_timeout_ms): Promise<unknown> {
+    if (!this.child) throw new SymphonyError("codex_not_found", "Codex app-server is not running");
+    const id = this.nextId++;
+    const payload = { id, method, params };
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new SymphonyError("response_timeout", `${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      this.child?.stdin.write(`${JSON.stringify(payload)}\n`);
+    });
+  }
+
+  private async waitForTurn(turnId: string): Promise<string> {
+    const deadline = Date.now() + this.options.config.codex.turn_timeout_ms;
+    return new Promise((resolve, reject) => {
+      const check = () => {
+        if (Date.now() > deadline) reject(new SymphonyError("turn_timeout", `Turn ${turnId} timed out`));
+        else setTimeout(check, 100);
+      };
+      const unsubscribe = this.onTurnTerminal(turnId, (status, error) => {
+        unsubscribe();
+        if (error) reject(error);
+        else resolve(status);
+      });
+      check();
+    });
+  }
+
+  private readonly turnWaiters = new Map<string, Set<(status: string, error?: Error) => void>>();
+
+  private onTurnTerminal(turnId: string, callback: (status: string, error?: Error) => void): () => void {
+    const set = this.turnWaiters.get(turnId) ?? new Set();
+    set.add(callback);
+    this.turnWaiters.set(turnId, set);
+    return () => set.delete(callback);
+  }
+
+  private handleLine(line: string): void {
+    if (!line.trim()) return;
+    let message: JsonObject;
+    try {
+      message = JSON.parse(line) as JsonObject;
+    } catch (error) {
+      this.emit("malformed", { message: errorMessage(error) });
+      return;
+    }
+    if ("id" in message && ("result" in message || "error" in message)) {
+      this.resolveResponse(message);
+      return;
+    }
+    if ("id" in message && typeof message.method === "string") {
+      void this.resolveServerRequest(message);
+      return;
+    }
+    if (typeof message.method === "string") this.handleNotification(message);
+    else this.emit("other_message", { raw: message });
+  }
+
+  private resolveResponse(message: JsonObject): void {
+    const id = message.id as string | number;
+    const pending = this.pending.get(id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pending.delete(id);
+    if ("error" in message) pending.reject(new SymphonyError("response_error", JSON.stringify(message.error)));
+    else pending.resolve(message.result);
+  }
+
+  private async resolveServerRequest(message: JsonObject): Promise<void> {
+    const id = message.id as string | number;
+    const method = String(message.method);
+    let result: unknown;
+    try {
+      if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") {
+        result = { decision: "acceptForSession" };
+        this.emit("approval_auto_approved", { message: method });
+      } else if (method === "item/fileChange/requestApproval" || method === "applyPatchApproval") {
+        result = { decision: "acceptForSession" };
+        this.emit("approval_auto_approved", { message: method });
+      } else if (method === "item/tool/requestUserInput") {
+        result = { answers: {} };
+        this.emit("turn_input_required", { message: "user input request failed by policy" });
+      } else if (method === "item/tool/call") {
+        result = await this.handleDynamicTool(message.params as JsonObject);
+      } else {
+        result = { contentItems: [{ type: "inputText", text: `Unsupported client request: ${method}` }], success: false };
+        this.emit("unsupported_tool_call", { message: method });
+      }
+    } catch (error) {
+      result = { contentItems: [{ type: "inputText", text: errorMessage(error) }], success: false };
+    }
+    this.child?.stdin.write(`${JSON.stringify({ id, result })}\n`);
+  }
+
+  private async handleDynamicTool(params: JsonObject): Promise<unknown> {
+    const name = typeof params.tool === "string" ? params.tool : typeof params.name === "string" ? params.name : "";
+    if (name !== "linear_graphql") {
+      return { contentItems: [{ type: "inputText", text: `Unsupported tool: ${name}` }], success: false };
+    }
+    const parsed = parseLinearToolArgs(params.arguments);
+    if (!this.options.linearTool) {
+      return { contentItems: [{ type: "inputText", text: "linear_graphql is unavailable for this session" }], success: false };
+    }
+    const result = await this.options.linearTool.executeGraphql(parsed.query, parsed.variables);
+    return { contentItems: [{ type: "inputText", text: JSON.stringify(result) }], success: result.success };
+  }
+
+  private handleNotification(message: JsonObject): void {
+    const method = String(message.method);
+    const params = (message.params && typeof message.params === "object" ? message.params : {}) as JsonObject;
+    const threadId = typeof params.threadId === "string" ? params.threadId : this.threadId;
+    const turn = params.turn && typeof params.turn === "object" ? (params.turn as JsonObject) : null;
+    const turnId = typeof params.turnId === "string" ? params.turnId : typeof turn?.id === "string" ? turn.id : null;
+    const sessionId = threadId && turnId ? `${threadId}-${turnId}` : null;
+    const usage = method === "thread/tokenUsage/updated" ? extractUsage(params.tokenUsage) : null;
+    const rateLimits = method === "account/rateLimits/updated" ? params.rateLimits : undefined;
+    this.emit(method, {
+      thread_id: threadId,
+      turn_id: turnId,
+      session_id: sessionId,
+      absolute_usage: usage,
+      rate_limits: rateLimits,
+      raw: params
+    });
+    if (method === "turn/completed" && turnId) {
+      const status = typeof turn?.status === "string" ? turn.status : "completed";
+      const waiters = this.turnWaiters.get(turnId);
+      for (const waiter of waiters ?? []) {
+        if (status === "completed") waiter(status);
+        else waiter(status, new SymphonyError(status === "interrupted" ? "turn_cancelled" : "turn_failed", `Turn ended with status ${status}`));
+      }
+    }
+    if (method === "error" && turnId) {
+      const waiters = this.turnWaiters.get(turnId);
+      for (const waiter of waiters ?? []) waiter("failed", new SymphonyError("turn_failed", JSON.stringify(params.error ?? params)));
+    }
+  }
+
+  private emit(event: string, extra: Partial<CodexRuntimeEvent>): void {
+    this.options.onEvent({
+      event,
+      timestamp: new Date().toISOString(),
+      codex_app_server_pid: this.pid,
+      ...extra
+    });
+  }
+}
+
+function extractUsage(value: unknown): { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Record<string, unknown>;
+  const input = numberFrom(data.input_tokens ?? data.inputTokens ?? data.input);
+  const output = numberFrom(data.output_tokens ?? data.outputTokens ?? data.output);
+  const total = numberFrom(data.total_tokens ?? data.totalTokens ?? data.total);
+  return {
+    ...(input === null ? {} : { input_tokens: input }),
+    ...(output === null ? {} : { output_tokens: output }),
+    ...(total === null ? {} : { total_tokens: total })
+  };
+}
+
+function numberFrom(value: unknown): number | null {
+  return Number.isFinite(value) ? Number(value) : null;
+}
+
+function parseLinearToolArgs(value: unknown): { query: string; variables: Record<string, unknown> } {
+  if (typeof value === "string") return { query: value, variables: {} };
+  if (!value || typeof value !== "object") throw new SymphonyError("linear_graphql_invalid_input", "linear_graphql arguments must be an object or query string");
+  const data = value as Record<string, unknown>;
+  if (typeof data.query !== "string" || !data.query.trim()) throw new SymphonyError("linear_graphql_invalid_input", "linear_graphql query is required");
+  if (data.variables !== undefined && (!data.variables || typeof data.variables !== "object" || Array.isArray(data.variables))) {
+    throw new SymphonyError("linear_graphql_invalid_input", "linear_graphql variables must be an object");
+  }
+  return { query: data.query, variables: (data.variables as Record<string, unknown> | undefined) ?? {} };
+}
