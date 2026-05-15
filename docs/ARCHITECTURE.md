@@ -13,7 +13,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - Workspace execution boundary: `src/workspace/manager.ts`
   - Maps issue identifiers to sanitized workspace keys, enforces root containment, and runs lifecycle hooks with timeouts.
 - Agent execution: `src/agent/*`
-  - Launches `bash -lc <codex.command>` in the per-issue workspace, injects a workspace-local `symphony_linear` MCP server for `linear_graphql`, speaks app-server JSON-RPC over stdio, handles approvals/user input/tool calls by policy, and streams events upward.
+  - Launches `bash -lc <codex.command>` in the per-issue workspace, injects a workspace-local `symphony_linear` MCP server for `linear_graphql`, starts a short-lived loopback bridge back to the orchestrator-owned Linear executor, speaks app-server JSON-RPC over stdio, handles approvals/user input/tool calls by policy, and streams events upward.
 - Coordination: `src/orchestrator/orchestrator.ts`
   - Owns mutable scheduler state, polling, dispatch, reconciliation, retry timers, token accounting, and runtime snapshots.
 - Observability and control: `src/observability/*`, `src/http/*`
@@ -26,7 +26,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - The orchestrator is the only owner of claim/running/retry state.
 - Agent subprocesses launch only with `cwd` equal to the per-issue workspace path.
 - Workspace paths must remain below the configured workspace root.
-- The Symphony Linear MCP bridge is generated into the issue workspace without embedding credentials; Linear auth is passed through subprocess environment only.
+- The Symphony Linear MCP script is generated into the issue workspace without embedding Linear credentials; it receives a per-run loopback bridge capability, while Linear auth stays inside the orchestrator-owned tracker adapter.
 - Issue identifiers are sanitized before they become directory names.
 - Secrets are accepted through config/env resolution but never logged.
 - `WORKFLOW.md` changes are reloaded without restart; invalid reloads keep the last known good config.

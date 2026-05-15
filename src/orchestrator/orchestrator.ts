@@ -16,6 +16,7 @@ import { isActiveState, isTerminalState, normalizeState } from "../config/config
 import type { Logger } from "../observability/logger.js";
 import { WorkspaceManager } from "../workspace/manager.js";
 import { AgentRunHandle } from "../agent/runner.js";
+import type { LinearGraphqlBridgeHandle, LinearGraphqlBridgeStartOptions } from "../agent/linearGraphqlBridge.js";
 
 export type OrchestratorOptions = {
   getConfig: () => SymphonyConfig;
@@ -25,6 +26,7 @@ export type OrchestratorOptions = {
   workspaceManager: WorkspaceManager;
   logger: Logger;
   linearTool?: GraphqlToolExecutor | null | undefined;
+  linearBridgeFactory?: ((options: LinearGraphqlBridgeStartOptions) => Promise<LinearGraphqlBridgeHandle | null>) | null | undefined;
 };
 
 export class Orchestrator {
@@ -269,6 +271,7 @@ export class Orchestrator {
       tracker: this.options.tracker,
       logger: this.options.logger,
       linearTool: this.options.linearTool,
+      linearBridgeFactory: this.options.linearBridgeFactory,
       onEvent: (event) => this.onCodexEvent(issue.id, event)
     });
     const startedAtMs = Date.now();

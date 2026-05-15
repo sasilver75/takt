@@ -14,6 +14,7 @@ import { WorkspaceManager } from "../workspace/manager.js";
 import { continuationPrompt, renderIssuePrompt } from "../workflow/prompt.js";
 import { isActiveState } from "../config/config.js";
 import { CodexAppServerClient } from "./codexClient.js";
+import { startLinearGraphqlBridge, type LinearGraphqlBridgeHandle, type LinearGraphqlBridgeStartOptions } from "./linearGraphqlBridge.js";
 
 export type AgentRunnerOptions = {
   issue: Issue;
@@ -25,6 +26,7 @@ export type AgentRunnerOptions = {
   logger: Logger;
   onEvent: (event: CodexRuntimeEvent) => void;
   linearTool?: GraphqlToolExecutor | null | undefined;
+  linearBridgeFactory?: ((options: LinearGraphqlBridgeStartOptions) => Promise<LinearGraphqlBridgeHandle | null>) | null | undefined;
 };
 
 export class AgentRunHandle {
@@ -36,18 +38,31 @@ export class AgentRunHandle {
   async run(): Promise<RunResult> {
     const started = Date.now();
     let workspacePath: string | undefined;
+    let bridge: LinearGraphqlBridgeHandle | null = null;
     try {
       const workspace = await this.options.workspaceManager.createForIssue(this.options.issue.identifier);
       workspacePath = workspace.path;
       this.options.workspaceManager.validateAgentCwd(workspace.path);
       await this.options.workspaceManager.runBeforeRun(workspace.path);
+      const config = this.options.getConfig();
+      if (config.codex.linear_graphql_mcp.enabled) {
+        const bridgeFactory = this.options.linearBridgeFactory ?? startLinearGraphqlBridge;
+        bridge = await bridgeFactory({
+          executor: this.options.linearTool,
+          issue: this.options.issue,
+          projectSlug: config.tracker.project_slug,
+          logger: this.options.logger,
+          onEvent: this.options.onEvent
+        });
+      }
       const client = new CodexAppServerClient({
-        config: this.options.getConfig(),
+        config,
         workspacePath: workspace.path,
         logger: this.options.logger,
         onEvent: this.options.onEvent,
         linearTool: this.options.linearTool,
-        issue: this.options.issue
+        issue: this.options.issue,
+        linearBridge: bridge
       });
       this.client = client;
       await client.start();
@@ -69,6 +84,8 @@ export class AgentRunHandle {
       }
 
       await client.stop();
+      await bridge?.close();
+      bridge = null;
       await this.options.workspaceManager.runAfterRun(workspace.path);
       if (this.cancelReason) {
         return { ok: false, reason: "cancelled", error: this.cancelReason, workspace_path: workspace.path, runtime_seconds: elapsed(started) };
@@ -76,6 +93,7 @@ export class AgentRunHandle {
       return { ok: true, reason: "normal", workspace_path: workspace.path, runtime_seconds: elapsed(started) };
     } catch (error) {
       if (this.client) await this.client.stop().catch(() => undefined);
+      if (bridge) await bridge.close().catch(() => undefined);
       if (workspacePath) await this.options.workspaceManager.runAfterRun(workspacePath).catch(() => undefined);
       const reason = classifyRunError(error);
       return {

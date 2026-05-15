@@ -33,7 +33,7 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and [docs/OPERATIONS.md](./do
 
 The generated Codex protocol schemas and TypeScript bindings live under `schema/codex-app-server` and `src/codex/generated`. They are treated as local protocol reference artifacts. The runtime client uses the current app-server JSON-RPC line framing and sends `initialize`, `thread/start`, and `turn/start` requests with workspace-scoped `cwd`.
 
-The implementation follows the agent-first harness guidance in OpenAI’s harness engineering article and Symphony announcement: repository-local knowledge is the system of record, observability is exposed to agents/operators, and the workflow prompt remains versioned with the target repo. Worker sessions get a Symphony-owned `linear_graphql` MCP tool so Linear handoff is portable and auditable rather than dependent on globally installed Codex plugins.
+The implementation follows the agent-first harness guidance in OpenAI’s harness engineering article and Symphony announcement: repository-local knowledge is the system of record, observability is exposed to agents/operators, and the workflow prompt remains versioned with the target repo. Worker sessions get a Symphony-owned `linear_graphql` MCP tool backed by a short-lived loopback bridge, so Linear handoff is portable and auditable rather than dependent on globally installed Codex plugins or worker-visible Linear credentials.
 
 ## Factory Harness
 

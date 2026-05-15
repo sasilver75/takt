@@ -5,25 +5,33 @@ import type { Issue, SymphonyConfig } from "../domain.js";
 const SCRIPT_DIR = ".symphony";
 const SCRIPT_FILE = "linear-graphql-mcp.mjs";
 
+export type LinearGraphqlMcpBridgeConfig = {
+  url: string;
+  token: string;
+};
+
 export type LinearMcpLaunch = {
   command: string;
   env: NodeJS.ProcessEnv;
   scriptPath: string | null;
 };
 
-export async function prepareLinearGraphqlMcp(config: SymphonyConfig, workspacePath: string, issue: Issue | null): Promise<LinearMcpLaunch> {
+export async function prepareLinearGraphqlMcp(
+  config: SymphonyConfig,
+  workspacePath: string,
+  issue: Issue | null,
+  bridge: LinearGraphqlMcpBridgeConfig | null
+): Promise<LinearMcpLaunch> {
   if (!config.codex.linear_graphql_mcp.enabled) {
     return { command: config.codex.command, env: process.env, scriptPath: null };
   }
   const scriptPath = path.join(workspacePath, SCRIPT_DIR, SCRIPT_FILE);
   await mkdir(path.dirname(scriptPath), { recursive: true });
-  await writeFile(scriptPath, linearGraphqlMcpServerSource(), { mode: 0o700 });
+  await writeFile(scriptPath, linearGraphqlMcpServerSource(bridge, config, issue), { mode: 0o700 });
   return {
     command: appendMcpConfig(config.codex.command, config.codex.linear_graphql_mcp.server_name, scriptPath),
     env: {
       ...process.env,
-      SYMPHONY_LINEAR_API_KEY: config.tracker.api_key ?? "",
-      SYMPHONY_LINEAR_ENDPOINT: config.tracker.endpoint,
       SYMPHONY_LINEAR_PROJECT_SLUG: config.tracker.project_slug ?? "",
       SYMPHONY_LINEAR_CURRENT_ISSUE_ID: issue?.id ?? "",
       SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: issue?.identifier ?? ""
@@ -46,15 +54,24 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-export function linearGraphqlMcpServerSource(): string {
+export function linearGraphqlMcpServerSource(
+  bridge: LinearGraphqlMcpBridgeConfig | null = null,
+  config: Pick<SymphonyConfig, "tracker"> | null = null,
+  issue: Issue | null = null
+): string {
   return `#!/usr/bin/env node
 import { createInterface } from "node:readline";
 
-const LINEAR_ENDPOINT = process.env.SYMPHONY_LINEAR_ENDPOINT || "https://api.linear.app/graphql";
-const LINEAR_API_KEY = process.env.SYMPHONY_LINEAR_API_KEY || process.env.LINEAR_API_KEY || "";
-const PROJECT_SLUG = process.env.SYMPHONY_LINEAR_PROJECT_SLUG || "";
-const CURRENT_ISSUE_ID = process.env.SYMPHONY_LINEAR_CURRENT_ISSUE_ID || "";
-const CURRENT_ISSUE_IDENTIFIER = process.env.SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER || "";
+const DEFAULT_BRIDGE_URL = ${JSON.stringify(bridge?.url ?? "")};
+const DEFAULT_BRIDGE_TOKEN = ${JSON.stringify(bridge?.token ?? "")};
+const DEFAULT_PROJECT_SLUG = ${JSON.stringify(config?.tracker.project_slug ?? "")};
+const DEFAULT_CURRENT_ISSUE_ID = ${JSON.stringify(issue?.id ?? "")};
+const DEFAULT_CURRENT_ISSUE_IDENTIFIER = ${JSON.stringify(issue?.identifier ?? "")};
+const BRIDGE_URL = process.env.SYMPHONY_LINEAR_BRIDGE_URL || DEFAULT_BRIDGE_URL;
+const BRIDGE_TOKEN = process.env.SYMPHONY_LINEAR_BRIDGE_TOKEN || DEFAULT_BRIDGE_TOKEN;
+const PROJECT_SLUG = process.env.SYMPHONY_LINEAR_PROJECT_SLUG || DEFAULT_PROJECT_SLUG;
+const CURRENT_ISSUE_ID = process.env.SYMPHONY_LINEAR_CURRENT_ISSUE_ID || DEFAULT_CURRENT_ISSUE_ID;
+const CURRENT_ISSUE_IDENTIFIER = process.env.SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER || DEFAULT_CURRENT_ISSUE_IDENTIFIER;
 
 const TOOL = {
   name: "linear_graphql",
@@ -151,25 +168,26 @@ async function callTool(params) {
   }
   const validation = validateSingleOperation(query);
   if (validation) return toolResult({ success: false, error: validation }, true);
-  if (!LINEAR_API_KEY) return toolResult({ success: false, error: "Linear API key is unavailable to Symphony MCP server" }, true);
+  if (!BRIDGE_URL || !BRIDGE_TOKEN) return toolResult({ success: false, error: "Symphony Linear GraphQL bridge is unavailable" }, true);
 
   const started = Date.now();
   try {
-    const response = await fetch(LINEAR_ENDPOINT, {
+    const response = await fetch(BRIDGE_URL, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: LINEAR_API_KEY
+        authorization: "Bearer " + BRIDGE_TOKEN
       },
       body: JSON.stringify({ query, variables })
     });
+    const body = await response.json().catch(() => null);
     if (!response.ok) {
-      return toolResult({ success: false, error: "Linear API returned HTTP " + response.status }, true);
+      audit({ success: false, duration_ms: Date.now() - started });
+      return toolResult({ success: false, error: bridgeError(body, response.status), context: contextPayload() }, true);
     }
-    const body = await response.json();
-    const success = !(body && typeof body === "object" && Object.prototype.hasOwnProperty.call(body, "errors"));
+    const success = Boolean(body && typeof body === "object" && body.success);
     audit({ success, duration_ms: Date.now() - started });
-    return toolResult({ success, body, context: contextPayload() }, !success);
+    return toolResult(body && typeof body === "object" ? body : { success: false, error: "Symphony Linear bridge returned invalid JSON", context: contextPayload() }, !success);
   } catch (error) {
     audit({ success: false, duration_ms: Date.now() - started });
     return toolResult({ success: false, error: String(error?.message || error), context: contextPayload() }, true);
@@ -197,6 +215,11 @@ function contextPayload() {
     current_issue_id: CURRENT_ISSUE_ID || null,
     current_issue_identifier: CURRENT_ISSUE_IDENTIFIER || null
   };
+}
+
+function bridgeError(body, status) {
+  if (body && typeof body === "object" && typeof body.error === "string") return body.error;
+  return "Symphony Linear bridge returned HTTP " + status;
 }
 
 function audit(event) {

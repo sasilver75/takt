@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import type { SymphonyConfig, CodexRuntimeEvent, GraphqlToolExecutor, Issue } from "../domain.js";
 import { SymphonyError, errorMessage } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
-import { prepareLinearGraphqlMcp } from "./linearGraphqlMcp.js";
+import { prepareLinearGraphqlMcp, type LinearGraphqlMcpBridgeConfig } from "./linearGraphqlMcp.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -14,6 +14,7 @@ export type CodexClientOptions = {
   onEvent: (event: CodexRuntimeEvent) => void;
   linearTool?: GraphqlToolExecutor | null | undefined;
   issue?: Issue | null | undefined;
+  linearBridge?: LinearGraphqlMcpBridgeConfig | null | undefined;
 };
 
 export class CodexAppServerClient {
@@ -30,7 +31,12 @@ export class CodexAppServerClient {
   }
 
   async start(): Promise<void> {
-    const launch = await prepareLinearGraphqlMcp(this.options.config, this.options.workspacePath, this.options.issue ?? null);
+    const launch = await prepareLinearGraphqlMcp(
+      this.options.config,
+      this.options.workspacePath,
+      this.options.issue ?? null,
+      this.options.linearBridge ?? null
+    );
     if (launch.scriptPath) {
       this.emit("linear_graphql_mcp_configured", { message: this.options.config.codex.linear_graphql_mcp.server_name });
     }
@@ -69,7 +75,7 @@ export class CodexAppServerClient {
       baseInstructions: [
         "You are running under Symphony, an automated software production orchestrator.",
         this.options.config.codex.linear_graphql_mcp.enabled
-          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads, comments, and issue state changes. Do not use raw Linear credentials from disk.`
+          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads, comments, and issue state changes. Do not use other Linear integrations, and do not use raw Linear credentials from disk.`
           : "Use only workflow-approved tools for Linear handoff and never read raw Linear credentials from disk."
       ].join("\n")
     })) as JsonObject;

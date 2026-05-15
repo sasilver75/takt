@@ -21,16 +21,15 @@ describe("linear GraphQL MCP bridge", () => {
     expect(command).not.toContain("LINEAR_API_KEY");
   });
 
-  test("serves linear_graphql over MCP stdio and fails closed without auth", async () => {
+  test("serves linear_graphql over MCP stdio and fails closed without a bridge", async () => {
     const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-mcp-"));
     const scriptPath = path.join(temp, "linear-graphql-mcp.mjs");
     await writeFile(scriptPath, linearGraphqlMcpServerSource(), { mode: 0o700 });
     const child = spawn(process.execPath, [scriptPath], {
       env: {
         ...process.env,
-        SYMPHONY_LINEAR_API_KEY: "",
-        LINEAR_API_KEY: "",
-        SYMPHONY_LINEAR_ENDPOINT: "https://api.linear.invalid/graphql",
+        SYMPHONY_LINEAR_BRIDGE_URL: "",
+        SYMPHONY_LINEAR_BRIDGE_TOKEN: "",
         SYMPHONY_LINEAR_PROJECT_SLUG: "demo",
         SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1"
       },
@@ -55,8 +54,16 @@ describe("linear GraphQL MCP bridge", () => {
     expect(toolResult).toMatchObject({ id: 3, result: { isError: true } });
     expect(JSON.parse(toolResult.result.content[0].text)).toMatchObject({
       success: false,
-      error: "Linear API key is unavailable to Symphony MCP server"
+      error: "Symphony Linear GraphQL bridge is unavailable"
     });
+  });
+
+  test("generated MCP source contains no Linear credential plumbing", () => {
+    const source = linearGraphqlMcpServerSource({ url: "http://127.0.0.1:1234/linear_graphql", token: "bridge-token" });
+    expect(source).toContain("DEFAULT_BRIDGE_URL");
+    expect(source).toContain("linear_graphql");
+    expect(source).not.toContain("LINEAR_API_KEY");
+    expect(source).not.toContain("api.linear.app");
   });
 });
 
