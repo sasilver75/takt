@@ -48,12 +48,12 @@ The deterministic Vitest suite uses fake Linear/local tracker and fake Codex app
 
 Live Linear/Codex checks are explicit operator actions because they require credentials, network access, and permission to touch real external systems.
 
-Live run performed on May 15, 2026:
+Live runs performed on May 15, 2026:
 
 - Linear project: `Gallatin Demo` (`5f14e4e68dc4`).
-- Issue: `SAM-65`, `Validate Symphony live run on Gallatin Demo`.
-- Result: real Codex app-server ran through Symphony, created and locally committed `LIVE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`.
-- Observed follow-up: the GitHub remote must contain the current implementation before production runs, otherwise clone-based workspaces can start from an outdated repository.
+- `SAM-65`, `Validate Symphony live run on Gallatin Demo`: real Codex app-server ran through Symphony, created and locally committed `LIVE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`. This first run exposed two operator issues: the GitHub remote still contained the placeholder source, and an in-repo workspace root allowed package-manager parent traversal.
+- Corrections applied: pushed the TypeScript Symphony implementation to `origin/main` and returned the workflow to the default temp-directory workspace root.
+- `SAM-66`, `Validate Symphony live run after GitHub source sync`: real Symphony cloned `origin/main` into an isolated temp workspace, Codex verified the checked-out repository contained the TypeScript implementation, ran `pnpm typecheck` and `pnpm test`, committed `LIVE_REMOTE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`.
 
 Before production use:
 

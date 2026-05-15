@@ -25,7 +25,7 @@ agent:
   max_turns: 20
   max_retry_backoff_ms: 300000
   max_concurrent_agents_by_state:
-    Human Review: 1
+    Needs Human: 1
 codex:
   command: codex app-server
   turn_timeout_ms: 3600000
