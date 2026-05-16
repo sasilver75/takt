@@ -109,6 +109,19 @@ If you ran the application, used Playwright, captured screenshots/traces/logs, o
 {
   "summary": "What was verified from the running app.",
   "verification": ["pnpm test", "pnpm build", "npx playwright test"],
+  "commands": [
+    {
+      "kind": "server",
+      "status": "started",
+      "command": "pnpm dev -- --host 127.0.0.1",
+      "description": "Served the app for browser inspection."
+    },
+    {
+      "kind": "capture",
+      "status": "succeeded",
+      "command": "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-123/homepage.png"
+    }
+  ],
   "app_urls": ["http://127.0.0.1:3000"],
   "artifacts": [
     { "kind": "screenshot", "path": "artifacts/SAM-123/homepage.png", "description": "Homepage after the change." },
@@ -117,6 +130,8 @@ If you ran the application, used Playwright, captured screenshots/traces/logs, o
   "notes": "Reviewer caveats or Notable none."
 }
 ```
+
+Use `verification` only for checks that completed successfully and directly support the PR claim. Use `commands` for supporting evidence commands such as starting a dev server, collecting logs, capturing screenshots, or exporting traces.
 
 The Docker worker image includes Chromium and a `symphony-capture-url <url> <output-path> [width,height]` helper for simple browser screenshots. Prefer the target repo's Playwright/Cypress/browser tests when present; use the helper for lightweight visual evidence when the repo has no browser test harness yet.
 

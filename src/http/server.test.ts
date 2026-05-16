@@ -24,7 +24,12 @@ describe("HTTP status server", () => {
             evidence: {
               comment_url: "https://github.test/acme/widgets/pull/7#issuecomment-1",
               warnings: ["Artifact path is not tracked by git at publish time"],
-              manifest: { artifacts: [{ path: "artifacts/ABC-1/home.png" }], app_urls: ["http://127.0.0.1:3000"], verification: ["pnpm test"] }
+              manifest: {
+                artifacts: [{ path: "artifacts/ABC-1/home.png" }],
+                app_urls: ["http://127.0.0.1:3000"],
+                verification: ["pnpm test"],
+                commands: [{ kind: "server", status: "started", command: "pnpm dev -- --host 127.0.0.1", description: "Served the app for screenshot capture." }]
+              }
             }
           }
         ],
@@ -77,7 +82,8 @@ describe("HTTP status server", () => {
                   summary: "Verified in browser.",
                   artifacts: [{ kind: "screenshot", path: "artifacts/ABC-1/home.png", description: "Homepage" }],
                   app_urls: ["http://127.0.0.1:3000"],
-                  verification: ["pnpm test"]
+                  verification: ["pnpm test"],
+                  commands: [{ kind: "server", status: "started", command: "pnpm dev -- --host 127.0.0.1", description: "Served the app for screenshot capture." }]
                 }
               }
             }
@@ -105,7 +111,7 @@ describe("HTTP status server", () => {
     expect(dashboard).toContain("Symphony Status");
     expect(dashboard).toContain("Recent Events");
     expect(dashboard).toContain("/issues/ABC-1");
-    expect(dashboard).toContain("evidence (1 artifact, 1 app URL, 1 check, 1 warning)");
+    expect(dashboard).toContain("evidence (1 artifact, 1 app URL, 1 check, 1 command, 1 warning)");
     expect(dashboard).toContain("Worker started");
     const issuePage = await (await fetch(`${base}/issues/ABC-1`)).text();
     expect(issuePage).toContain("Issue ABC-1");
@@ -114,6 +120,9 @@ describe("HTTP status server", () => {
     expect(issuePage).toContain("/artifacts/ABC-1/artifacts/ABC-1/home.png");
     expect(issuePage).toContain("Artifact path is not tracked by git at publish time");
     expect(issuePage).toContain("Verified in browser.");
+    expect(issuePage).toContain("server started:");
+    expect(issuePage).toContain("pnpm dev -- --host 127.0.0.1");
+    expect(issuePage).toContain("Served the app for screenshot capture.");
     expect(issuePage).toContain("Run Attempts");
     expect(issuePage).toContain("succeeded");
     expect(issuePage).toContain("12.5");

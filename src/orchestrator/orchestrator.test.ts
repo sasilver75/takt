@@ -287,12 +287,14 @@ describe("orchestrator", () => {
       manifest: {
         summary: "Verified with Playwright.",
         verification: ["pnpm test", "npx playwright test"],
+        commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
         app_urls: ["http://127.0.0.1:3000"],
         artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
       }
     });
     expect(prPublishInputs[0]).toMatchObject({
       evidenceManifest: {
+        commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
         artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
       }
     });
@@ -302,6 +304,7 @@ describe("orchestrator", () => {
         github_evidence_comment_url: "https://github.test/acme/widgets/pull/18#issuecomment-1818",
         github_evidence_warnings: ["Artifact path is not tracked by git at publish time"],
         github_evidence_manifest: {
+          commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
           artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
         }
       }
@@ -315,6 +318,7 @@ describe("orchestrator", () => {
             warnings: ["Artifact path is not tracked by git at publish time"],
             manifest: {
               verification: ["pnpm test", "npx playwright test"],
+              commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
               app_urls: ["http://127.0.0.1:3000"],
               artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
             }
@@ -1408,6 +1412,7 @@ rl.on("line", (line) => {
       writeFileSync("SYMPHONY_EVIDENCE.json", JSON.stringify({
         summary: "Verified with Playwright.",
         verification: ["pnpm test", "npx playwright test"],
+        commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
         app_urls: ["http://127.0.0.1:3000"],
         artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png", description: "Home page after change." }],
         notes: "No known reviewer caveats."

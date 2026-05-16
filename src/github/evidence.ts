@@ -158,6 +158,11 @@ export function renderEvidenceComment(
     for (const entry of manifest.verification.slice(0, 20)) lines.push(`- ${singleLine(entry)}`);
   }
 
+  if (manifest.commands?.length) {
+    lines.push("", "### Evidence Commands");
+    for (const command of manifest.commands.slice(0, 20)) lines.push(`- ${renderEvidenceCommand(command)}`);
+  }
+
   if (manifest.app_urls?.length) {
     lines.push("", "### App URLs");
     for (const entry of manifest.app_urls.slice(0, 20)) lines.push(`- ${singleLine(entry)}`);
@@ -224,6 +229,15 @@ function renderArtifact(pullRequest: PublishedPullRequest, artifact: EvidenceArt
 function renderArtifactPathTarget(pullRequest: PublishedPullRequest, normalizedPath: string, repository?: { owner: string | null; repo: string | null }): string {
   const url = artifactBlobUrl(pullRequest, normalizedPath, repository);
   return url ? `[${escapeMarkdownText(normalizedPath)}](${url})` : `\`${normalizedPath}\``;
+}
+
+function renderEvidenceCommand(command: NonNullable<EvidenceManifest["commands"]>[number]): string {
+  const prefix = [command.kind?.trim(), command.status?.trim()]
+    .filter((value): value is string => Boolean(value))
+    .map(singleLine)
+    .join(" ");
+  const description = command.description?.trim();
+  return `${prefix ? `${prefix}: ` : ""}${singleLine(command.command)}${description ? ` - ${singleLine(description)}` : ""}`;
 }
 
 function artifactBlobUrl(pullRequest: PublishedPullRequest, normalizedPath: string, repository?: { owner: string | null; repo: string | null }): string | null {

@@ -23,6 +23,10 @@ describe("GitHub PR evidence publisher", () => {
         manifest: {
           summary: "Verified the app flow.",
           verification: ["pnpm test", "npx playwright test"],
+          commands: [
+            { kind: "server", status: "started", command: "pnpm dev -- --host 127.0.0.1", description: "Launched the app for browser capture." },
+            { kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-9/home.png" }
+          ],
           app_urls: ["http://127.0.0.1:3000"],
           artifacts: [
             { kind: "screenshot", path: "/workspace/artifacts/SAM-9/home.png", description: "Homepage after change." },
@@ -45,6 +49,9 @@ describe("GitHub PR evidence publisher", () => {
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("artifacts/SAM-9/home.png");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("https://github.test/acme/widgets/blob/symphony/sam-9/artifacts/SAM-9/home.png");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("npx playwright test");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("### Evidence Commands");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("server started: pnpm dev -- --host 127.0.0.1 - Launched the app for browser capture.");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("capture succeeded: symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-9/home.png");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("### Artifact Warnings");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("was not found in the worker workspace");
   });

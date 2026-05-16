@@ -7,6 +7,7 @@ import type {
   DurableStateSnapshot,
   DurableStateStore,
   EvidenceArtifact,
+  EvidenceCommand,
   EvidenceManifest,
   Issue,
   IssueDebugRecord,
@@ -1268,6 +1269,7 @@ async function readEvidenceManifest(workspacePath: string, fileName: string): Pr
     return {
       ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
       ...(Array.isArray(record.verification) ? { verification: record.verification.filter((entry): entry is string => typeof entry === "string") } : {}),
+      ...(Array.isArray(record.commands) ? { commands: record.commands.map(readEvidenceCommand).filter((entry): entry is EvidenceCommand => Boolean(entry)) } : {}),
       ...(Array.isArray(record.app_urls) ? { app_urls: record.app_urls.filter((entry): entry is string => typeof entry === "string") } : {}),
       ...(Array.isArray(record.artifacts) ? { artifacts: record.artifacts.map(readEvidenceArtifact).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) } : {}),
       ...(typeof record.notes === "string" ? { notes: record.notes } : {})
@@ -1276,6 +1278,18 @@ async function readEvidenceManifest(workspacePath: string, fileName: string): Pr
     if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") return null;
     throw error;
   }
+}
+
+function readEvidenceCommand(value: unknown): EvidenceCommand | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.command !== "string" || record.command.trim().length === 0) return null;
+  return {
+    command: record.command,
+    ...(typeof record.kind === "string" ? { kind: record.kind } : {}),
+    ...(typeof record.status === "string" ? { status: record.status } : {}),
+    ...(typeof record.description === "string" ? { description: record.description } : {})
+  };
 }
 
 function readEvidenceArtifact(value: unknown): EvidenceArtifact | null {
@@ -1324,6 +1338,7 @@ function readTrackedEvidenceManifest(value: unknown): EvidenceManifest | null {
   return {
     ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
     ...(Array.isArray(record.verification) ? { verification: record.verification.filter((entry): entry is string => typeof entry === "string") } : {}),
+    ...(Array.isArray(record.commands) ? { commands: record.commands.map(readEvidenceCommand).filter((entry): entry is EvidenceCommand => Boolean(entry)) } : {}),
     ...(Array.isArray(record.app_urls) ? { app_urls: record.app_urls.filter((entry): entry is string => typeof entry === "string") } : {}),
     ...(Array.isArray(record.artifacts) ? { artifacts: record.artifacts.map(readEvidenceArtifact).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) } : {}),
     ...(typeof record.notes === "string" ? { notes: record.notes } : {})

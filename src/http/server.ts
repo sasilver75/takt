@@ -130,6 +130,7 @@ function renderDashboard(snapshot: unknown): string {
           artifacts?: unknown[];
           app_urls?: string[];
           verification?: string[];
+          commands?: unknown[];
         } | null;
       } | null;
     }>;
@@ -325,6 +326,7 @@ function renderIssueEvidenceDetails(issue: IssuePageSnapshot, evidence: Record<s
   const warnings = readStringArray(tracked.github_evidence_warnings);
   if (!evidence && !commentUrl && !lastError && warnings.length === 0) return "<p>No worker evidence has been published for this issue.</p>";
   const verification = readStringArray(evidence?.verification);
+  const commands = readEvidenceCommandArray(evidence?.commands);
   const appUrls = readStringArray(evidence?.app_urls);
   const artifacts = readObjectArray(evidence?.artifacts);
   return `<dl>
@@ -332,6 +334,7 @@ function renderIssueEvidenceDetails(issue: IssuePageSnapshot, evidence: Record<s
     <dt>Published At</dt><dd>${escapeHtml(readString(tracked.github_evidence_published_at) ?? "")}</dd>
     <dt>Summary</dt><dd>${escapeHtml(readString(evidence?.summary) ?? "")}</dd>
     <dt>Verification</dt><dd>${renderStringList(verification)}</dd>
+    <dt>Commands</dt><dd>${renderEvidenceCommandList(commands)}</dd>
     <dt>App URLs</dt><dd>${renderLinkedList(appUrls)}</dd>
     <dt>Artifacts</dt><dd>${renderArtifactList(issue, artifacts)}</dd>
     <dt>Warnings</dt><dd>${renderWarningList(warnings)}</dd>
@@ -343,6 +346,17 @@ function renderIssueEvidenceDetails(issue: IssuePageSnapshot, evidence: Record<s
 function renderStringList(values: string[]): string {
   if (values.length === 0) return "";
   return `<ul>${values.map((value) => `<li><code>${escapeHtml(value)}</code></li>`).join("")}</ul>`;
+}
+
+function renderEvidenceCommandList(commands: NonNullable<EvidenceManifest["commands"]>): string {
+  if (commands.length === 0) return "";
+  return `<ul>${commands.map((command) => `<li>${renderEvidenceCommand(command)}</li>`).join("")}</ul>`;
+}
+
+function renderEvidenceCommand(command: NonNullable<EvidenceManifest["commands"]>[number]): string {
+  const prefix = [command.kind, command.status].map((value) => value?.trim()).filter(Boolean).join(" ");
+  const description = command.description?.trim();
+  return `${prefix ? `${escapeHtml(prefix)}: ` : ""}<code>${escapeHtml(command.command)}</code>${description ? ` - ${escapeHtml(description)}` : ""}`;
 }
 
 function renderLinkedList(values: string[]): string {
@@ -468,9 +482,25 @@ function readEvidenceManifestFromIssue(issue: IssuePageSnapshot): EvidenceManife
   return {
     ...(typeof evidence.summary === "string" ? { summary: evidence.summary } : {}),
     ...(Array.isArray(evidence.verification) ? { verification: evidence.verification.filter((entry): entry is string => typeof entry === "string") } : {}),
+    ...(Array.isArray(evidence.commands) ? { commands: readEvidenceCommandArray(evidence.commands) } : {}),
     ...(Array.isArray(evidence.app_urls) ? { app_urls: evidence.app_urls.filter((entry): entry is string => typeof entry === "string") } : {}),
     ...(Array.isArray(evidence.artifacts) ? { artifacts: evidence.artifacts.map(readEvidenceArtifact).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) } : {}),
     ...(typeof evidence.notes === "string" ? { notes: evidence.notes } : {})
+  };
+}
+
+function readEvidenceCommandArray(value: unknown): NonNullable<EvidenceManifest["commands"]> {
+  return Array.isArray(value) ? value.map(readEvidenceCommand).filter((entry): entry is NonNullable<EvidenceManifest["commands"]>[number] => Boolean(entry)) : [];
+}
+
+function readEvidenceCommand(value: unknown): NonNullable<EvidenceManifest["commands"]>[number] | null {
+  const command = readObject(value);
+  if (!command || typeof command.command !== "string" || command.command.trim().length === 0) return null;
+  return {
+    command: command.command,
+    ...(typeof command.kind === "string" ? { kind: command.kind } : {}),
+    ...(typeof command.status === "string" ? { status: command.status } : {}),
+    ...(typeof command.description === "string" ? { description: command.description } : {})
   };
 }
 
@@ -532,18 +562,20 @@ function renderEvidenceCell(evidence: {
   comment_url?: string | null;
   last_error?: string | null;
   warnings?: string[];
-  manifest?: { artifacts?: unknown[]; app_urls?: string[]; verification?: string[] } | null;
+  manifest?: { artifacts?: unknown[]; app_urls?: string[]; verification?: string[]; commands?: unknown[] } | null;
 } | null): string {
   if (!evidence) return "";
   if (evidence.last_error) return `<span title="${escapeHtml(evidence.last_error)}">error</span>`;
   const artifactCount = evidence.manifest?.artifacts?.length ?? 0;
   const appCount = evidence.manifest?.app_urls?.length ?? 0;
   const verificationCount = evidence.manifest?.verification?.length ?? 0;
+  const commandCount = evidence.manifest?.commands?.length ?? 0;
   const warningCount = evidence.warnings?.length ?? 0;
   const detail = [
     artifactCount ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "",
     appCount ? `${appCount} app URL${appCount === 1 ? "" : "s"}` : "",
     verificationCount ? `${verificationCount} check${verificationCount === 1 ? "" : "s"}` : "",
+    commandCount ? `${commandCount} command${commandCount === 1 ? "" : "s"}` : "",
     warningCount ? `${warningCount} warning${warningCount === 1 ? "" : "s"}` : ""
   ]
     .filter(Boolean)

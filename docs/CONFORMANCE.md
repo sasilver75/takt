@@ -32,7 +32,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Hosted `linear_graphql` MCP bridge | `src/agent/linearGraphqlBridge.ts`, `src/agent/linearGraphqlMcp.ts`, `src/tracker/linear.ts` | `src/agent/linearGraphqlBridge.test.ts`, `src/agent/linearGraphqlMcp.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Durable state | `src/persistence/jsonStateStore.ts`, `src/orchestrator/orchestrator.ts` | `src/persistence/jsonStateStore.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | GitHub PR publishing, handoff-manifest hygiene, lifecycle reconciliation, and human-merge recovery | `src/github/publisher.ts`, `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/publisher.test.ts`, `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts` |
-| Worker evidence manifest validation, bounded artifact auto-publishing, sticky PR evidence comment, persisted artifact warnings, dashboard/API evidence summary, and local artifact browsing | `src/github/evidence.ts`, `src/github/evidenceArtifacts.ts`, `src/orchestrator/orchestrator.ts`, `src/http/server.ts` | `src/github/evidence.test.ts`, `src/github/publisher.test.ts`, `src/orchestrator/orchestrator.test.ts`, `src/http/server.test.ts`, live PRs `#3`, `#4`, and `#5` |
+| Worker evidence manifest validation, separated verification/check command metadata, bounded artifact auto-publishing, sticky PR evidence comment, persisted artifact warnings, dashboard/API evidence summary, and local artifact browsing | `src/github/evidence.ts`, `src/github/evidenceArtifacts.ts`, `src/orchestrator/orchestrator.ts`, `src/http/server.ts` | `src/github/evidence.test.ts`, `src/github/publisher.test.ts`, `src/orchestrator/orchestrator.test.ts`, `src/http/server.test.ts`, live PRs `#3`, `#4`, `#5`, and `#6` |
 | Policy-gated GitHub merge extension | `src/github/merger.ts`, `src/orchestrator/orchestrator.ts` | `src/github/merger.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Docker-first worker runtime with baseline Chromium screenshot capability | `src/runtime/workerRuntime.ts`, `docker/codex-worker.Dockerfile`, `docker/symphony-capture-url`, `docs/OPERATIONS.md` | `src/runtime/workerRuntime.test.ts`, `src/runtime/dockerImage.test.ts`, live `SAM-71` run |
 | PR follow-up from checks/comments/reviews/threads | `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts`, live PR `#3` |
@@ -44,11 +44,11 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 - App-shaped factory harness: `pnpm test:factory`.
 - Non-mutating live readiness profile: `pnpm integration:live`, explicitly enabled with `SYMPHONY_LIVE_INTEGRATION=1`.
 - Live Linear/Codex/Docker history: `docs/OPERATIONS.md`.
-- Latest live PR loop evidence: PR `#5`, sticky evidence comment `#issuecomment-4468087596`.
+- Latest live PR loop evidence: PR `#6`, sticky evidence comment `#issuecomment-4468480674`.
 
 ## Known Gaps And Watch Items
 
 - Mutating full-loop real integration checks are operator-run, not automatic CI gates, because they touch Linear/GitHub and require live credentials. A non-mutating readiness profile exists and reports skipped status unless explicitly enabled.
 - The HTTP dashboard is functional and state-backed, including per-issue drill-down pages, bounded worker run-attempt history, and local browsing for evidence-manifest artifacts under `artifacts/`; external artifact retention and cross-run analytics remain product work.
-- Workers can attach durable artifacts through committed files, or by listing small workspace-contained files/directories under `artifacts/` in the evidence manifest so Symphony uploads them to the PR branch. Large binary artifact retention, external object storage, video capture conventions, and trace viewers are not yet first-class orchestration features.
+- Workers can attach durable artifacts through committed files, or by listing small workspace-contained files/directories under `artifacts/` in the evidence manifest so Symphony uploads them to the PR branch. The evidence manifest distinguishes successful verification checks from supporting launch/capture/export commands, but large binary artifact retention, external object storage, video capture conventions, and trace viewers are not yet first-class orchestration features.
 - The spec's SSH worker appendix is not implemented; Docker is the first-class isolation runtime.

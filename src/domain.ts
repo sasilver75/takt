@@ -206,9 +206,17 @@ export type EvidenceArtifact = {
   description?: string;
 };
 
+export type EvidenceCommand = {
+  command: string;
+  kind?: string;
+  status?: string;
+  description?: string;
+};
+
 export type EvidenceManifest = {
   summary?: string;
   verification?: string[];
+  commands?: EvidenceCommand[];
   app_urls?: string[];
   artifacts?: EvidenceArtifact[];
   notes?: string;
