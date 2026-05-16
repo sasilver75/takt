@@ -751,6 +751,72 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("does not requeue an already handled review thread when GitHub moves the thread commit to the new head", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-thread-stable-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-thread-stable", identifier: "SAM-20", state: "Todo", title: "Handle moving review thread" });
+    const tracker = new LocalTracker([activeIssue]);
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return {
+          number: 20,
+          url: "https://github.test/acme/widgets/pull/20",
+          branch: "symphony/sam-20-handle-moving-review-thread",
+          title: "SAM-20: Handle moving review thread",
+          created: published.length === 1
+        };
+      }
+    };
+    let inspectCount = 0;
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        inspectCount += 1;
+        return movingReviewThreadInspection(inspectCount === 1 ? "old-head-sha" : "new-head-sha");
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }} attempt={{ attempt }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => published.length === 1, "initial pull request publication");
+    await orchestrator.tick();
+    await waitFor(() => published.length === 2, "review thread follow-up publication");
+    await orchestrator.tick();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(published).toHaveLength(2);
+    expect(tracker.comments.filter((comment) => comment.body.includes("GitHub unresolved review threads need attention"))).toHaveLength(1);
+    await orchestrator.stop();
+  });
+
   test("recovers open Symphony PRs after restart and suppresses duplicate dispatch", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-recover-"));
     const cfg = {
@@ -1090,6 +1156,55 @@ function conversationAndThreadInspection(): PullRequestInspection {
             created_at: "2026-05-16T06:22:30.000Z",
             updated_at: "2026-05-16T06:22:30.000Z",
             commit_id: "conversation-head-sha"
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function movingReviewThreadInspection(headSha: string): PullRequestInspection {
+  return {
+    number: 20,
+    url: "https://github.test/acme/widgets/pull/20",
+    branch: "symphony/sam-20-handle-moving-review-thread",
+    title: "SAM-20: Handle moving review thread",
+    state: "open",
+    checks_status: "success",
+    review_status: "approved",
+    head_sha: headSha,
+    mergeable_state: "clean",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: `PR #20 is open; checks=success; review=approved at ${headSha}.`,
+    checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/20" }],
+    reviews: [
+      {
+        reviewer: "reviewer",
+        state: "APPROVED",
+        submitted_at: "2026-05-16T06:30:00.000Z",
+        body: "Looks good after this thread is addressed.",
+        url: "https://github.test/review/20",
+        commit_id: headSha
+      }
+    ],
+    review_comments: [],
+    issue_comments: [],
+    review_threads: [
+      {
+        id: "thread-20-open",
+        is_resolved: false,
+        is_outdated: false,
+        path: "src/widget.ts",
+        line: 88,
+        comments: [
+          {
+            author: "reviewer",
+            body: "This edge case still needs coverage.",
+            url: "https://github.test/thread/20",
+            created_at: "2026-05-16T06:31:00.000Z",
+            updated_at: "2026-05-16T06:31:00.000Z",
+            commit_id: headSha
           }
         ]
       }

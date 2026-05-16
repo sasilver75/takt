@@ -1236,14 +1236,10 @@ function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledK
       feedback.push({
         key: feedbackKey("review_thread", {
           id: thread.id,
-          is_outdated: thread.is_outdated,
-          path: thread.path,
-          line: thread.line,
           comments: thread.comments.map((comment) => ({
             author: comment.author,
             created_at: comment.created_at,
             updated_at: comment.updated_at,
-            commit_id: comment.commit_id,
             url: comment.url,
             body: comment.body
           }))
@@ -1260,8 +1256,6 @@ function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledK
           line: comment.line,
           created_at: comment.created_at,
           updated_at: comment.updated_at,
-          commit_id: comment.commit_id,
-          original_commit_id: comment.original_commit_id,
           url: comment.url,
           body: comment.body
         }),
@@ -1321,7 +1315,6 @@ function reviewIdentity(review: PullRequestInspection["reviews"][number]): Recor
     reviewer: review.reviewer,
     state: review.state,
     submitted_at: review.submitted_at,
-    commit_id: review.commit_id,
     url: review.url,
     body: review.body
   };
