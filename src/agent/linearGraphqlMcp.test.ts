@@ -42,9 +42,10 @@ describe("linear GraphQL MCP launch config", () => {
         LINEAR_API_KEY: "local-secret",
         GITHUB_TOKEN: "github-secret",
         NORMAL_FLAG: "1",
-        WRAPPED: "before-local-secret-after"
+        WRAPPED: "before-local-secret-after",
+        GITHUB_WRAPPED: "before-ghp_configured_secret-after"
       },
-      config(),
+      { ...config(), github: { ...githubDisabled(), enabled: true, token: "ghp_configured_secret" } },
       { SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1" }
     );
 
@@ -52,6 +53,7 @@ describe("linear GraphQL MCP launch config", () => {
     expect(env.LINEAR_API_KEY).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
     expect(env.WRAPPED).toBeUndefined();
+    expect(env.GITHUB_WRAPPED).toBeUndefined();
   });
 });
 
@@ -65,8 +67,11 @@ function config(): SymphonyConfig {
       api_key: "local-secret",
       project_slug: "demo",
       active_states: ["Todo"],
-      terminal_states: ["Done"]
+      terminal_states: ["Done"],
+      claim_state: null,
+      review_state: null
     },
+    github: githubDisabled(),
     polling: { interval_ms: 30_000 },
     workspace: { root: "/tmp/workspaces" },
     runtime: { kind: "host" },
@@ -94,6 +99,21 @@ function config(): SymphonyConfig {
       linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
     server: { port: null, host: "127.0.0.1" }
+  };
+}
+
+function githubDisabled(): SymphonyConfig["github"] {
+  return {
+    enabled: false,
+    owner: null,
+    repo: null,
+    api_endpoint: "https://api.github.com",
+    token: null,
+    remote: "origin",
+    base_branch: "main",
+    branch_prefix: "symphony",
+    pr_ready_file: "SYMPHONY_PR_READY.json",
+    draft: false
   };
 }
 

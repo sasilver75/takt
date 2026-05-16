@@ -72,8 +72,11 @@ export class CodexAppServerClient {
       baseInstructions: [
         "You are running under Symphony, an automated software production orchestrator.",
         this.options.config.codex.linear_graphql_mcp.enabled
-          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads, comments, and issue state changes. Do not use other Linear integrations, do not use raw Linear credentials from disk, and do not inspect Symphony harness internals.`
-          : "Use only workflow-approved tools for Linear handoff, never read raw Linear credentials from disk, and do not inspect Symphony harness internals."
+          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads. Do not use other Linear integrations, do not use raw Linear credentials from disk, and do not inspect Symphony harness internals.`
+          : "Use only workflow-approved tools for issue context, never read raw tracker credentials from disk, and do not inspect Symphony harness internals.",
+        this.options.config.github.enabled
+          ? `When implementation work is ready for PR review, commit all code changes and write ${this.options.config.github.pr_ready_file} in the workspace root as JSON with title, summary, verification, and risk fields. Do not create the GitHub PR yourself and do not move the issue to review; Symphony will publish the PR and update the tracker.`
+          : "Follow the workflow prompt for handoff."
       ].join("\n")
     })) as JsonObject;
     const thread = result.thread as JsonObject | undefined;

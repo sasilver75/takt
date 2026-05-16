@@ -102,6 +102,58 @@ export class LinearTrackerClient implements TrackerClient {
     }
   }
 
+  async transitionIssue(issue: Issue, stateName: string): Promise<Issue> {
+    const stateId = await this.workflowStateIdForIssue(issue.id, stateName);
+    const mutation = `
+      mutation SymphonyIssueTransition($id: String!, $stateId: String!) {
+        issueUpdate(id: $id, input: { stateId: $stateId }) {
+          success
+          issue { ${ISSUE_FIELDS} }
+        }
+      }
+    `;
+    const body = await this.graphql(mutation, { id: issue.id, stateId });
+    const updated = valueAtPath(body, ["data", "issueUpdate", "issue"]);
+    return normalizeIssue(updated);
+  }
+
+  async commentOnIssue(issue: Issue, bodyText: string): Promise<void> {
+    const mutation = `
+      mutation SymphonyIssueComment($issueId: String!, $body: String!) {
+        commentCreate(input: { issueId: $issueId, body: $body }) {
+          success
+        }
+      }
+    `;
+    await this.graphql(mutation, { issueId: issue.id, body: bodyText });
+  }
+
+  private async workflowStateIdForIssue(issueId: string, stateName: string): Promise<string> {
+    const issueQuery = `
+      query SymphonyIssueTeam($id: String!) {
+        issue(id: $id) { id team { id } }
+      }
+    `;
+    const issueBody = await this.graphql(issueQuery, { id: issueId });
+    const teamId = nullableString(valueAtPath(issueBody, ["data", "issue", "team", "id"]));
+    if (!teamId) throw new SymphonyError("linear_unknown_payload", "Linear issue team id was missing");
+    const statesQuery = `
+      query SymphonyWorkflowState($teamId: String!, $name: String!) {
+        workflowStates(first: 50, filter: { team: { id: { eq: $teamId } }, name: { eq: $name } }) {
+          nodes { id name }
+        }
+      }
+    `;
+    const statesBody = await this.graphql(statesQuery, { teamId, name: stateName });
+    const nodes = readArrayAt(statesBody, ["data", "workflowStates", "nodes"]);
+    const state = nodes.find((node) => node && typeof node === "object" && (node as Record<string, unknown>).name === stateName) as
+      | Record<string, unknown>
+      | undefined;
+    const stateId = nullableString(state?.id);
+    if (!stateId) throw new SymphonyError("linear_state_not_found", `Linear workflow state not found: ${stateName}`);
+    return stateId;
+  }
+
   private async graphql(
     query: string,
     variables: Record<string, unknown>,

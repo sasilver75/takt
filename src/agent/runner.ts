@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+import path from "node:path";
 import type {
   Issue,
   RunResult,
@@ -83,6 +85,7 @@ export class AgentRunHandle {
             ? await renderIssuePrompt(this.options.getWorkflow(), issue, this.options.attempt)
             : continuationPrompt(turnNumber, this.options.getConfig().agent.max_turns);
         await client.runTurn(prompt);
+        if (await isPrReady(workspace.path, this.options.getConfig())) break;
         const refreshed = await this.options.tracker.fetchIssueStatesByIds([issue.id]);
         issue = refreshed[0] ?? issue;
         if (!isActiveState(issue.state, this.options.getConfig())) break;
@@ -126,6 +129,16 @@ export class AgentRunHandle {
     this.cancelReason = reason;
     await this.client?.stop();
     await this.runtime?.cleanup();
+  }
+}
+
+async function isPrReady(workspacePath: string, config: SymphonyConfig): Promise<boolean> {
+  if (!config.github.enabled) return false;
+  try {
+    await access(path.join(workspacePath, config.github.pr_ready_file));
+    return true;
+  } catch {
+    return false;
   }
 }
 

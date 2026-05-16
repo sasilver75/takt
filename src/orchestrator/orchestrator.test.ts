@@ -2,9 +2,10 @@ import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import type { SymphonyConfig } from "../domain.js";
+import type { PullRequestPublisher, SymphonyConfig } from "../domain.js";
 import { createLogger } from "../observability/logger.js";
 import { FakeTracker, issue } from "../testing/fakes.js";
+import { LocalTracker } from "../testing/localTracker.js";
 import { WorkspaceManager } from "../workspace/manager.js";
 import { Orchestrator, sortForDispatch } from "./orchestrator.js";
 
@@ -61,6 +62,63 @@ describe("orchestrator", () => {
     expect((orchestrator.snapshot() as { counts: { running: number } }).counts.running).toBe(0);
     await orchestrator.stop();
   });
+
+  test("claims an issue, publishes PR-ready worker commits, comments, and moves to review", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr", identifier: "SAM-9", state: "Todo", title: "Ship PR loop" });
+    const tracker = new LocalTracker([activeIssue]);
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9-ship-pr-loop", title: "SAM-9: Ship PR loop", created: true };
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(published).toHaveLength(1);
+    expect(published[0]).toMatchObject({
+      issue: { identifier: "SAM-9", state: "In Progress" },
+      manifest: { title: "SAM-9: Ship PR loop", verification: ["pnpm test"] }
+    });
+    expect(tracker.getIssue("i-pr")?.state).toBe("Needs Human");
+    expect(tracker.comments[0]?.body).toContain("https://github.test/acme/widgets/pull/9");
+    expect(orchestrator.issueSnapshot("SAM-9")).toMatchObject({
+      status: "completed",
+      tracked: { github_pull_request: { url: "https://github.test/acme/widgets/pull/9" } }
+    });
+    await orchestrator.stop();
+  });
 });
 
 function config(root: string, command: string): SymphonyConfig {
@@ -73,8 +131,11 @@ function config(root: string, command: string): SymphonyConfig {
       api_key: "secret",
       project_slug: "demo",
       active_states: ["Todo", "In Progress"],
-      terminal_states: ["Done", "Closed"]
+      terminal_states: ["Done", "Closed"],
+      claim_state: null,
+      review_state: null
     },
+    github: githubDisabled(),
     polling: { interval_ms: 60_000 },
     workspace: { root: path.join(root, "workspaces") },
     runtime: { kind: "host" },
@@ -91,6 +152,43 @@ function config(root: string, command: string): SymphonyConfig {
       linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
     server: { port: null, host: "127.0.0.1" }
+  };
+}
+
+function fakePrReadyCodexServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+import { writeFileSync } from "node:fs";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: {} });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" } } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
+    setTimeout(() => {
+      writeFileSync("SYMPHONY_PR_READY.json", JSON.stringify({ title: "SAM-9: Ship PR loop", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
+      send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
+      send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+    }, 10);
+  }
+});
+`;
+}
+
+function githubDisabled(): SymphonyConfig["github"] {
+  return {
+    enabled: false,
+    owner: null,
+    repo: null,
+    api_endpoint: "https://api.github.com",
+    token: null,
+    remote: "origin",
+    base_branch: "main",
+    branch_prefix: "symphony",
+    pr_ready_file: "SYMPHONY_PR_READY.json",
+    draft: false
   };
 }
 

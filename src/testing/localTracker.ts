@@ -2,6 +2,7 @@ import type { GraphqlToolExecutor, Issue, TrackerClient } from "../domain.js";
 
 export class LocalTracker implements TrackerClient, GraphqlToolExecutor {
   private readonly issues = new Map<string, Issue>();
+  readonly comments: Array<{ issue_id: string; body: string }> = [];
 
   constructor(issues: Issue[]) {
     for (const issue of issues) this.issues.set(issue.id, issue);
@@ -42,6 +43,18 @@ export class LocalTracker implements TrackerClient, GraphqlToolExecutor {
         }
       }
     };
+  }
+
+  async transitionIssue(issue: Issue, stateName: string): Promise<Issue> {
+    const current = this.issues.get(issue.id);
+    if (!current) throw new Error(`Unknown local issue id ${issue.id}`);
+    const updated = { ...current, state: stateName, updated_at: new Date().toISOString() };
+    this.issues.set(issue.id, updated);
+    return updated;
+  }
+
+  async commentOnIssue(issue: Issue, body: string): Promise<void> {
+    this.comments.push({ issue_id: issue.id, body });
   }
 
   getIssue(id: string): Issue | null {

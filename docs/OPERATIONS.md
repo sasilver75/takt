@@ -4,7 +4,7 @@
 
 ```bash
 docker build -f docker/codex-worker.Dockerfile -t symphony-codex-worker:latest .
-LINEAR_API_KEY=... pnpm dev ./WORKFLOW.md --port 8787
+LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm dev ./WORKFLOW.md --port 8787
 ```
 
 The positional argument selects the workflow file. If omitted, Symphony uses `./WORKFLOW.md`.
@@ -37,10 +37,19 @@ The current safety posture is:
 - Leave `workspace.root` unset unless there is a concrete deployment reason; the default temp-directory root avoids package-manager parent traversal into this repo.
 - `after_create` and `before_remove` hooks are host workspace lifecycle hooks. `before_run` and `after_run` execute through the selected worker runtime, so Docker workflows install dependencies and write run evidence inside the same container filesystem view used by Codex. The example workflow clones once on `after_create`, then runs `git fetch origin main && git merge --ff-only origin/main` on every `before_run`; reused workspaces therefore fast-forward to the current source branch, while divergent local evidence commits fail visibly instead of being destructively reset.
 - Linear credentials are resolved from workflow config/env indirection, redacted from logs, and scrubbed from the Codex app-server child environment.
+- GitHub credentials are resolved from workflow config/env indirection and used only by the orchestrator-owned PR publisher. Workers do not receive `GITHUB_TOKEN`; they commit changes and write the configured PR-ready manifest.
 - Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the `symphony_linear` MCP server. Symphony hosts that MCP server on a short-lived Streamable HTTP endpoint and registers only its runtime URL with Codex; no Linear API key or bridge token is written into the worker workspace. Docker workers use an MCP bearer-token env var rather than an argv or workspace-file secret.
 - Docker workers receive a runtime lease env including `SYMPHONY_RUN_ID`, `SYMPHONY_PORT_BASE`, `PORT`, `APP_PORT`, `VITE_PORT`, `DATABASE_PORT`, `REDIS_PORT`, `TMPDIR`, and `COMPOSE_PROJECT_NAME` to reduce port/service-name collisions.
 - The Docker image/build context excludes `keys.txt`, `.env*`, `node_modules`, `dist`, and `.git`.
 - `.symphony` is orchestrator-owned runtime wiring. Workers are instructed not to inspect it, print it, or commit it.
+
+When `github.enabled: true`, the issue-to-PR loop is:
+
+1. Symphony moves the issue to `tracker.claim_state` before launching the worker.
+2. The worker implements, verifies, commits, and writes `github.pr_ready_file` in the workspace root.
+3. Symphony pushes a branch named from `github.branch_prefix` and the issue identifier/title.
+4. Symphony creates or updates a GitHub PR against `github.base_branch`.
+5. Symphony comments the PR URL in Linear and moves the issue to `tracker.review_state`.
 
 The configured `runtime.docker.codex_home` path is used only as an auth source. Symphony copies `auth.json` into an ephemeral per-run temp directory, mounts that minimal copy read-write into the worker container, and deletes it during runtime cleanup. It intentionally does not copy Codex plugin caches, marketplace config, app approvals, rollout state, or shell history, so workers do not inherit ambient Linear/GitHub/Vercel tools from the operator environment. Use a dedicated low-privilege Codex account/home for production factory runs. For a more restrictive deployment, also set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony itself under a dedicated OS/container/VM boundary with limited credentials.
 

@@ -12,8 +12,11 @@ function config(): SymphonyConfig {
       api_key: "secret",
       project_slug: "demo",
       active_states: ["Todo"],
-      terminal_states: ["Done"]
+      terminal_states: ["Done"],
+      claim_state: null,
+      review_state: null
     },
+    github: githubDisabled(),
     polling: { interval_ms: 1000 },
     workspace: { root: "/tmp/work" },
     runtime: { kind: "host" },
@@ -30,6 +33,21 @@ function config(): SymphonyConfig {
       linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
     server: { port: null, host: "127.0.0.1" }
+  };
+}
+
+function githubDisabled(): SymphonyConfig["github"] {
+  return {
+    enabled: false,
+    owner: null,
+    repo: null,
+    api_endpoint: "https://api.github.com",
+    token: null,
+    remote: "origin",
+    base_branch: "main",
+    branch_prefix: "symphony",
+    pr_ready_file: "SYMPHONY_PR_READY.json",
+    draft: false
   };
 }
 
@@ -93,6 +111,33 @@ describe("linear tracker", () => {
     const gqlError = new LinearTrackerClient(config, (async () => new Response(JSON.stringify({ errors: [{ message: "bad" }] }), { status: 200 })) as typeof fetch);
     await expect(gqlError.fetchCandidateIssues()).rejects.toMatchObject({ code: "linear_graphql_errors" });
     expect(() => validateSingleOperation("query A { viewer { id } } mutation B { x }")).toThrow(/exactly one/);
+  });
+
+  test("transitions issues by workflow state name and creates comments", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+      requests.push(request);
+      if (request.query.includes("SymphonyIssueTeam")) {
+        return new Response(JSON.stringify({ data: { issue: { id: "id-1", team: { id: "team-1" } } } }), { status: 200 });
+      }
+      if (request.query.includes("SymphonyWorkflowState")) {
+        return new Response(JSON.stringify({ data: { workflowStates: { nodes: [{ id: "state-1", name: "Needs Human" }] } } }), { status: 200 });
+      }
+      if (request.query.includes("SymphonyIssueTransition")) {
+        return new Response(JSON.stringify({ data: { issueUpdate: { success: true, issue: rawIssue({ state: { name: "Needs Human" } }) } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: { commentCreate: { success: true } } }), { status: 200 });
+    };
+    const client = new LinearTrackerClient(config, fetchImpl as typeof fetch);
+    await expect(client.transitionIssue(normalizeIssue(rawIssue()), "Needs Human")).resolves.toMatchObject({ state: "Needs Human" });
+    await expect(client.commentOnIssue(normalizeIssue(rawIssue()), "Published PR")).resolves.toBeUndefined();
+    expect(requests.map((request) => request.variables)).toEqual([
+      { id: "id-1" },
+      { teamId: "team-1", name: "Needs Human" },
+      { id: "id-1", stateId: "state-1" },
+      { issueId: "id-1", body: "Published PR" }
+    ]);
   });
 });
 

@@ -44,10 +44,10 @@ export function appendMcpConfig(command: string, serverName: string, url: string
 
 export function sanitizedCodexEnv(
   baseEnv: NodeJS.ProcessEnv,
-  config: Pick<SymphonyConfig, "tracker">,
+  config: Pick<SymphonyConfig, "tracker" | "github">,
   extras: NodeJS.ProcessEnv = {}
 ): NodeJS.ProcessEnv {
-  const secretValues = [config.tracker.api_key].filter((value): value is string => typeof value === "string" && value.length > 8);
+  const secretValues = [config.tracker.api_key, config.github.token].filter((value): value is string => typeof value === "string" && value.length > 8);
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(baseEnv)) {
     if (value === undefined) continue;

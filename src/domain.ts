@@ -36,6 +36,20 @@ export type SymphonyConfig = {
     project_slug: string | null;
     active_states: string[];
     terminal_states: string[];
+    claim_state: string | null;
+    review_state: string | null;
+  };
+  github: {
+    enabled: boolean;
+    owner: string | null;
+    repo: string | null;
+    api_endpoint: string;
+    token: string | null;
+    remote: string;
+    base_branch: string;
+    branch_prefix: string;
+    pr_ready_file: string;
+    draft: boolean;
   };
   polling: {
     interval_ms: number;
@@ -148,10 +162,32 @@ export type TrackerClient = {
   fetchCandidateIssues(): Promise<Issue[]>;
   fetchIssuesByStates(stateNames: string[]): Promise<Issue[]>;
   fetchIssueStatesByIds(issueIds: string[]): Promise<Issue[]>;
+  transitionIssue?(issue: Issue, stateName: string): Promise<Issue>;
+  commentOnIssue?(issue: Issue, body: string): Promise<void>;
 };
 
 export type GraphqlToolExecutor = {
   executeGraphql(query: string, variables?: Record<string, unknown>): Promise<{ success: boolean; body?: unknown; error?: string }>;
+};
+
+export type PrReadyManifest = {
+  title?: string;
+  summary?: string;
+  body?: string;
+  verification?: string[];
+  risk?: string;
+};
+
+export type PublishedPullRequest = {
+  number: number;
+  url: string;
+  branch: string;
+  title: string;
+  created: boolean;
+};
+
+export type PullRequestPublisher = {
+  publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest }): Promise<PublishedPullRequest>;
 };
 
 export type RunningEntry = {

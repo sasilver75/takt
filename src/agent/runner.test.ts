@@ -51,8 +51,11 @@ function config(root: string, command: string): SymphonyConfig {
       api_key: "secret",
       project_slug: "demo",
       active_states: ["Todo", "In Progress"],
-      terminal_states: ["Done"]
+      terminal_states: ["Done"],
+      claim_state: null,
+      review_state: null
     },
+    github: githubDisabled(),
     polling: { interval_ms: 1000 },
     workspace: { root: path.join(root, "workspaces") },
     runtime: { kind: "host" },
@@ -69,6 +72,21 @@ function config(root: string, command: string): SymphonyConfig {
       linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
     server: { port: null, host: "127.0.0.1" }
+  };
+}
+
+function githubDisabled(): SymphonyConfig["github"] {
+  return {
+    enabled: false,
+    owner: null,
+    repo: null,
+    api_endpoint: "https://api.github.com",
+    token: null,
+    remote: "origin",
+    base_branch: "main",
+    branch_prefix: "symphony",
+    pr_ready_file: "SYMPHONY_PR_READY.json",
+    draft: false
   };
 }
 

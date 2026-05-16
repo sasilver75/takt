@@ -138,8 +138,11 @@ function config(temp: string, workspaceRoot: string, command: string, toySource:
       api_key: "local-secret",
       project_slug: "toy",
       active_states: ["Todo", "In Progress"],
-      terminal_states: ["Done", "Closed"]
+      terminal_states: ["Done", "Closed"],
+      claim_state: null,
+      review_state: null
     },
+    github: githubDisabled(),
     polling: { interval_ms: 60_000 },
     workspace: { root: workspaceRoot },
     runtime: { kind: "host" },
@@ -167,6 +170,21 @@ function config(temp: string, workspaceRoot: string, command: string, toySource:
       linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
     server: { port: null, host: "127.0.0.1" }
+  };
+}
+
+function githubDisabled(): SymphonyConfig["github"] {
+  return {
+    enabled: false,
+    owner: null,
+    repo: null,
+    api_endpoint: "https://api.github.com",
+    token: null,
+    remote: "origin",
+    base_branch: "main",
+    branch_prefix: "symphony",
+    pr_ready_file: "SYMPHONY_PR_READY.json",
+    draft: false
   };
 }
 

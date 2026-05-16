@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type {
   CodexRuntimeEvent,
   Issue,
@@ -7,6 +9,8 @@ import type {
   RuntimeEvent,
   RuntimeState,
   RunningEntry,
+  PullRequestPublisher,
+  PrReadyManifest,
   SymphonyConfig,
   TrackerClient,
   WorkflowDefinition
@@ -27,6 +31,7 @@ export type OrchestratorOptions = {
   logger: Logger;
   linearTool?: GraphqlToolExecutor | null | undefined;
   linearBridgeFactory?: ((options: LinearGraphqlBridgeStartOptions) => Promise<LinearGraphqlBridgeHandle | null>) | null | undefined;
+  pullRequestPublisher?: PullRequestPublisher | null | undefined;
 };
 
 export class Orchestrator {
@@ -104,7 +109,7 @@ export class Orchestrator {
 
       for (const issue of sortForDispatch(issues)) {
         if (this.availableGlobalSlots() <= 0) break;
-        if (this.shouldDispatch(issue)) this.dispatchIssue(issue, null);
+        if (this.shouldDispatch(issue)) await this.dispatchIssue(issue, null);
       }
     } finally {
       this.ticking = false;
@@ -260,10 +265,21 @@ export class Orchestrator {
     return true;
   }
 
-  private dispatchIssue(issue: Issue, attempt: number | null): void {
+  private async dispatchIssue(issue: Issue, attempt: number | null): Promise<void> {
     this.state.claimed.add(issue.id);
+    let runIssue = issue;
+    try {
+      runIssue = await this.claimIssue(issue);
+    } catch (error) {
+      this.state.claimed.delete(issue.id);
+      const message = errorMessage(error);
+      this.ensureRecord(issue).last_error = message;
+      this.scheduleRetry(issue.id, nextAttempt(attempt), issue.identifier, message, false);
+      this.recordEvent({ at: new Date().toISOString(), event: "claim_failed", issue_id: issue.id, issue_identifier: issue.identifier, message });
+      return;
+    }
     const handle = new AgentRunHandle({
-      issue,
+      issue: runIssue,
       attempt,
       getConfig: this.options.getConfig,
       getWorkflow: this.options.getWorkflow,
@@ -276,12 +292,12 @@ export class Orchestrator {
     });
     const startedAtMs = Date.now();
     const entry: RunningEntry = {
-      issue,
-      identifier: issue.identifier,
+      issue: runIssue,
+      identifier: runIssue.identifier,
       started_at_ms: startedAtMs,
       started_at: new Date(startedAtMs).toISOString(),
       retry_attempt: attempt,
-      workspace_path: this.options.workspaceManager.workspacePath(issue.identifier),
+      workspace_path: this.options.workspaceManager.workspacePath(runIssue.identifier),
       session_id: null,
       thread_id: null,
       turn_id: null,
@@ -299,11 +315,11 @@ export class Orchestrator {
       turn_count: 0,
       terminate: (reason) => handle.terminate(reason)
     };
-    this.state.running.set(issue.id, entry);
-    this.state.retry_attempts.delete(issue.id);
-    this.ensureRecord(issue).restart_count += attempt ? 1 : 0;
-    this.recordEvent({ at: new Date().toISOString(), event: "dispatch", issue_id: issue.id, issue_identifier: issue.identifier });
-    void handle.run().then((result) => this.onWorkerExit(issue.id, result));
+    this.state.running.set(runIssue.id, entry);
+    this.state.retry_attempts.delete(runIssue.id);
+    this.ensureRecord(runIssue).restart_count += attempt ? 1 : 0;
+    this.recordEvent({ at: new Date().toISOString(), event: "dispatch", issue_id: runIssue.id, issue_identifier: runIssue.identifier });
+    void handle.run().then((result) => void this.onWorkerExit(runIssue.id, result));
   }
 
   private onCodexEvent(issueId: string, event: CodexRuntimeEvent): void {
@@ -343,7 +359,7 @@ export class Orchestrator {
     });
   }
 
-  private onWorkerExit(issueId: string, result: { ok: boolean; runtime_seconds: number; error?: string; workspace_path?: string }): void {
+  private async onWorkerExit(issueId: string, result: { ok: boolean; runtime_seconds: number; error?: string; workspace_path?: string }): Promise<void> {
     const entry = this.state.running.get(issueId);
     if (!entry) return;
     this.state.running.delete(issueId);
@@ -351,8 +367,13 @@ export class Orchestrator {
     const record = this.ensureRecord(entry.issue);
     record.workspace_path = result.workspace_path ?? entry.workspace_path;
     if (result.ok) {
-      this.state.completed.add(issueId);
-      this.scheduleRetry(issueId, 1, entry.identifier, null, true);
+      if (await this.tryPublishPullRequest(entry.issue, record.workspace_path)) {
+        this.state.completed.add(issueId);
+        this.state.claimed.delete(issueId);
+      } else {
+        this.state.completed.add(issueId);
+        this.scheduleRetry(issueId, 1, entry.identifier, record.last_error, true);
+      }
     } else {
       record.last_error = result.error ?? "worker failed";
       this.scheduleRetry(issueId, nextAttempt(entry.retry_attempt), entry.identifier, record.last_error, false);
@@ -364,6 +385,57 @@ export class Orchestrator {
       issue_identifier: entry.identifier,
       message: result.error ?? null
     });
+  }
+
+  private async claimIssue(issue: Issue): Promise<Issue> {
+    const claimState = this.options.getConfig().tracker.claim_state;
+    if (!claimState || normalizeState(issue.state) === normalizeState(claimState)) return issue;
+    if (!this.options.tracker.transitionIssue) throw new Error("Tracker does not support issue state transitions");
+    const updated = await this.options.tracker.transitionIssue(issue, claimState);
+    this.recordEvent({
+      at: new Date().toISOString(),
+      event: "issue_claimed",
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      message: claimState
+    });
+    return updated;
+  }
+
+  private async tryPublishPullRequest(issue: Issue, workspacePath: string | null): Promise<boolean> {
+    const config = this.options.getConfig();
+    if (!config.github.enabled || !this.options.pullRequestPublisher || !workspacePath) return false;
+    try {
+      const manifest = await readPrReadyManifest(workspacePath, config.github.pr_ready_file);
+      if (!manifest) return false;
+      const published = await this.options.pullRequestPublisher.publish({ issue, workspacePath, manifest });
+      const record = this.ensureRecord(issue);
+      record.tracked.github_pull_request = published;
+      await this.options.tracker.commentOnIssue?.(issue, `Published PR: ${published.url}`);
+      if (config.tracker.review_state) {
+        if (!this.options.tracker.transitionIssue) throw new Error("Tracker does not support issue state transitions");
+        await this.options.tracker.transitionIssue(issue, config.tracker.review_state);
+      }
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_published",
+        issue_id: issue.id,
+        issue_identifier: issue.identifier,
+        message: published.url
+      });
+      return true;
+    } catch (error) {
+      const message = errorMessage(error);
+      this.ensureRecord(issue).last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_publish_failed",
+        issue_id: issue.id,
+        issue_identifier: issue.identifier,
+        message
+      });
+      return false;
+    }
   }
 
   private scheduleRetry(issueId: string, attempt: number, identifier: string, error: string | null, continuation: boolean): void {
@@ -483,6 +555,25 @@ export function sortForDispatch(issues: Issue[]): Issue[] {
 
 function nextAttempt(current: number | null): number {
   return current === null ? 1 : current + 1;
+}
+
+async function readPrReadyManifest(workspacePath: string, fileName: string): Promise<PrReadyManifest | null> {
+  try {
+    const raw = await readFile(path.join(workspacePath, fileName), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("manifest must be a JSON object");
+    const record = parsed as Record<string, unknown>;
+    return {
+      ...(typeof record.title === "string" ? { title: record.title } : {}),
+      ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+      ...(typeof record.body === "string" ? { body: record.body } : {}),
+      ...(Array.isArray(record.verification) ? { verification: record.verification.filter((entry): entry is string => typeof entry === "string") } : {}),
+      ...(typeof record.risk === "string" ? { risk: record.risk } : {})
+    };
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 function summarizeRaw(raw: unknown): string | null {

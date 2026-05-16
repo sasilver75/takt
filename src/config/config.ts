@@ -15,6 +15,7 @@ export function resolveConfig(
 ): SymphonyConfig {
   const root = workflow.config;
   const tracker = objectAt(root, "tracker");
+  const github = objectAt(root, "github");
   const polling = objectAt(root, "polling");
   const workspace = objectAt(root, "workspace");
   const runtime = objectAt(root, "runtime");
@@ -36,7 +37,21 @@ export function resolveConfig(
       api_key: resolveSecret(stringAt(tracker, "api_key") ?? "$LINEAR_API_KEY", env),
       project_slug: emptyToNull(stringAt(tracker, "project_slug")),
       active_states: stringListAt(tracker, "active_states", DEFAULT_ACTIVE_STATES),
-      terminal_states: stringListAt(tracker, "terminal_states", DEFAULT_TERMINAL_STATES)
+      terminal_states: stringListAt(tracker, "terminal_states", DEFAULT_TERMINAL_STATES),
+      claim_state: emptyToNull(stringAt(tracker, "claim_state")),
+      review_state: emptyToNull(stringAt(tracker, "review_state"))
+    },
+    github: {
+      enabled: booleanAt(github, "enabled", false),
+      owner: emptyToNull(stringAt(github, "owner")),
+      repo: emptyToNull(stringAt(github, "repo")),
+      api_endpoint: stringAt(github, "api_endpoint") ?? "https://api.github.com",
+      token: resolveOptionalSecret(stringAt(github, "token"), env),
+      remote: stringAt(github, "remote") ?? "origin",
+      base_branch: stringAt(github, "base_branch") ?? "main",
+      branch_prefix: stringAt(github, "branch_prefix") ?? "symphony",
+      pr_ready_file: stringAt(github, "pr_ready_file") ?? "SYMPHONY_PR_READY.json",
+      draft: booleanAt(github, "draft", false)
     },
     polling: {
       interval_ms: positiveIntegerAt(polling, "interval_ms", 30000)
@@ -93,6 +108,16 @@ export function validateDispatchConfig(config: SymphonyConfig): void {
   }
   if (config.runtime.kind === "docker" && !config.runtime.docker.image.trim()) {
     throw new SymphonyError("missing_runtime_image", "runtime.docker.image must be present when runtime.kind is docker");
+  }
+  if (config.github.enabled) {
+    if (!config.github.owner) throw new SymphonyError("missing_github_owner", "github.owner is required when github.enabled is true");
+    if (!config.github.repo) throw new SymphonyError("missing_github_repo", "github.repo is required when github.enabled is true");
+    if (!config.github.token) throw new SymphonyError("missing_github_token", "github.token is required when github.enabled is true");
+    if (!config.github.remote.trim()) throw new SymphonyError("invalid_config_value", "github.remote must be non-empty");
+    if (!config.github.base_branch.trim()) throw new SymphonyError("invalid_config_value", "github.base_branch must be non-empty");
+    if (!config.github.pr_ready_file.trim() || config.github.pr_ready_file.includes("/") || config.github.pr_ready_file.includes("\\")) {
+      throw new SymphonyError("invalid_config_value", "github.pr_ready_file must be a workspace-root file name");
+    }
   }
 }
 
@@ -237,6 +262,11 @@ function stringMapAt(root: Record<string, unknown>, key: string): Record<string,
 function resolveSecret(value: string, env: ConfigEnvironment): string | null {
   if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(value)) return emptyToNull(env[value.slice(1)] ?? "");
   return emptyToNull(value);
+}
+
+function resolveOptionalSecret(value: string | null, env: ConfigEnvironment): string | null {
+  if (value === null) return null;
+  return resolveSecret(value, env);
 }
 
 function resolvePath(value: string, workflowDir: string, env: ConfigEnvironment): string {

@@ -22,6 +22,7 @@ Production workflows should keep secrets in environment variables and refer to t
 - `src/workflow`: `WORKFLOW.md` discovery, YAML front matter parsing, hot reload, strict Liquid prompt rendering.
 - `src/config`: typed config defaults, env indirection, validation, state normalization.
 - `src/tracker`: Linear GraphQL adapter and `linear_graphql` tool backend.
+- `src/github`: orchestrator-owned branch push and GitHub PR creation/update.
 - `src/workspace`: sanitized workspace paths, containment checks, lifecycle hooks.
 - `src/runtime`: first-class Docker worker runtime with host fallback for local tests/debugging.
 - `src/agent`: Codex app-server JSON-line client, hosted `symphony_linear` MCP bridge, and agent runner.
@@ -35,7 +36,9 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and [docs/OPERATIONS.md](./do
 
 The generated Codex protocol schemas and TypeScript bindings live under `schema/codex-app-server` and `src/codex/generated`. They are treated as local protocol reference artifacts. The runtime client uses the current app-server JSON-RPC line framing and sends `initialize`, `thread/start`, and `turn/start` requests with runtime-scoped `cwd`.
 
-The implementation follows the agent-first harness guidance in OpenAI’s [harness engineering article](https://openai.com/index/harness-engineering/) and [Symphony announcement](https://openai.com/index/open-source-codex-orchestration-symphony/): repository-local knowledge is the system of record, observability is exposed to agents/operators, and the workflow prompt remains versioned with the target repo. Worker sessions run Codex app-server inside a per-issue Docker container by default, with the workspace mounted at `/workspace`, an ephemeral minimal Codex home containing auth material, and no repo root or `keys.txt` mount. They get a Symphony-owned `linear_graphql` MCP tool backed by a short-lived authenticated Streamable HTTP MCP server, so Linear handoff is portable and auditable rather than dependent on globally installed Codex plugins or worker-visible Linear credentials. Tracker secrets are scrubbed from the Codex app-server environment and redacted from Symphony logs.
+The implementation follows the agent-first harness guidance in OpenAI’s [harness engineering article](https://openai.com/index/harness-engineering/) and [Symphony announcement](https://openai.com/index/open-source-codex-orchestration-symphony/): repository-local knowledge is the system of record, observability is exposed to agents/operators, and the workflow prompt remains versioned with the target repo. Worker sessions run Codex app-server inside a per-issue Docker container by default, with the workspace mounted at `/workspace`, an ephemeral minimal Codex home containing auth material, and no repo root or `keys.txt` mount. They get a Symphony-owned `linear_graphql` MCP tool backed by a short-lived authenticated Streamable HTTP MCP server, so Linear reads are portable and auditable rather than dependent on globally installed Codex plugins or worker-visible Linear credentials. Tracker and GitHub secrets are scrubbed from the Codex app-server environment and redacted from Symphony logs.
+
+When `github.enabled` is configured, workers commit their code and signal PR readiness with `SYMPHONY_PR_READY.json`; Symphony then pushes the issue branch, creates or updates the GitHub PR, comments the PR link in Linear, and moves the issue to the configured review state. GitHub credentials stay in the orchestrator process and are not mounted into worker containers.
 
 ## Factory Harness
 

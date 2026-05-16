@@ -10,6 +10,8 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
   - Applies defaults, resolves `$VAR` only where explicitly configured, expands workspace paths, and validates dispatch preflight.
 - Tracker integration: `src/tracker/linear.ts`
   - Implements Linear candidate fetch, terminal-state fetch, state refresh, normalization, pagination, and the `linear_graphql` extension backend.
+- PR publishing: `src/github/publisher.ts`
+  - Pushes committed worker branches and creates or updates GitHub pull requests with orchestrator-held credentials after a worker writes the configured PR-ready manifest.
 - Workspace execution boundary: `src/workspace/manager.ts`
   - Maps issue identifiers to sanitized workspace keys, enforces root containment, and runs lifecycle hooks with timeouts.
 - Worker runtime boundary: `src/runtime/workerRuntime.ts`
@@ -30,6 +32,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - Workspace paths must remain below the configured workspace root.
 - The Symphony Linear MCP server is hosted by the orchestrator. Host workers receive a loopback URL; Docker workers receive a `host.docker.internal` URL plus a per-run bearer-token env-var reference. Linear auth stays inside the orchestrator-owned tracker adapter.
 - Tracker secrets are removed from the Codex app-server environment and redacted from Symphony logs and status events. Workers are instructed to treat `.symphony` as orchestrator-owned wiring rather than task context.
+- GitHub publishing credentials stay in the orchestrator. Workers produce commits plus a PR-ready manifest; Symphony owns branch push, PR creation/update, Linear PR comment, and review-state transition.
 - Docker workers mount only the per-issue workspace and an ephemeral per-run Codex home containing auth material copied from the configured source. Operator plugin caches, app approvals, rollout state, shell history, `keys.txt`, and the repo root are not mounted or copied into the image/build context.
 - Issue identifiers are sanitized before they become directory names.
 - Secrets are accepted through config/env resolution but never logged.
