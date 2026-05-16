@@ -3,6 +3,8 @@ import path from "node:path";
 import type {
   CodexRuntimeEvent,
   DiscoveredPullRequest,
+  DurableStateSnapshot,
+  DurableStateStore,
   Issue,
   IssueDebugRecord,
   GraphqlToolExecutor,
@@ -37,6 +39,7 @@ export type OrchestratorOptions = {
   linearBridgeFactory?: ((options: LinearGraphqlBridgeStartOptions) => Promise<LinearGraphqlBridgeHandle | null>) | null | undefined;
   pullRequestPublisher?: PullRequestPublisher | null | undefined;
   pullRequestTracker?: PullRequestTracker | null | undefined;
+  durableStore?: DurableStateStore | null | undefined;
 };
 
 export class Orchestrator {
@@ -44,6 +47,7 @@ export class Orchestrator {
   private tickTimer: NodeJS.Timeout | null = null;
   private ticking = false;
   private stopped = false;
+  private persistenceChain: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: OrchestratorOptions) {
     const config = options.getConfig();
@@ -62,6 +66,7 @@ export class Orchestrator {
   }
 
   async start(): Promise<void> {
+    await this.restoreDurableState();
     await this.startupCleanup();
     this.scheduleTick(0);
   }
@@ -73,6 +78,8 @@ export class Orchestrator {
       if (retry.timer_handle) clearTimeout(retry.timer_handle);
     }
     await Promise.all([...this.state.running.values()].map((entry) => Promise.resolve(entry.terminate("orchestrator stopped"))));
+    this.persistState();
+    await this.flushPersistence();
   }
 
   notifyConfigReload(config: SymphonyConfig): void {
@@ -233,6 +240,31 @@ export class Orchestrator {
     }
   }
 
+  private async restoreDurableState(): Promise<void> {
+    if (!this.options.durableStore) return;
+    const snapshot = await this.options.durableStore.load();
+    if (!snapshot) return;
+    this.state.completed = new Set(snapshot.completed_issue_ids);
+    this.state.codex_totals = snapshot.codex_totals;
+    this.state.codex_rate_limits = snapshot.codex_rate_limits;
+    this.state.recent_events = snapshot.recent_events.slice(-200);
+    this.state.issue_history = new Map(snapshot.issue_history.map((record) => [record.issue_identifier, record]));
+    for (const retry of snapshot.retry_attempts) {
+      if (this.state.completed.has(retry.issue_id)) continue;
+      const delay = Math.max(retry.due_at_ms - Date.now(), 0);
+      this.state.retry_attempts.set(retry.issue_id, {
+        ...retry,
+        timer_handle: setTimeout(() => void this.onRetryTimer(retry.issue_id), delay)
+      });
+      this.state.claimed.add(retry.issue_id);
+    }
+    this.options.logger.info("durable state restored", {
+      retrying: this.state.retry_attempts.size,
+      completed: this.state.completed.size,
+      issue_history: this.state.issue_history.size
+    });
+  }
+
   private async reconcileRunningIssues(): Promise<void> {
     this.reconcileStalls();
     const runningIds = [...this.state.running.keys()];
@@ -370,10 +402,12 @@ export class Orchestrator {
       if (inspection.state === "merged" || inspection.state === "closed") {
         this.state.completed.add(record.issue_id);
         record.tracked.github_pr_terminal_state = inspection.state;
+        this.persistState();
         continue;
       }
       const reason = pullRequestFollowupReason(inspection);
       if (reason) await this.queuePullRequestFollowup(record, pullRequest, inspection, reason);
+      else this.persistState();
     }
   }
 
@@ -603,6 +637,7 @@ export class Orchestrator {
       if (await this.tryPublishPullRequest(entry.issue, record.workspace_path)) {
         this.state.completed.add(issueId);
         this.state.claimed.delete(issueId);
+        this.persistState();
       } else {
         this.scheduleRetry(issueId, 1, entry.identifier, record.last_error, true, null);
       }
@@ -617,6 +652,7 @@ export class Orchestrator {
       issue_identifier: entry.identifier,
       message: result.error ?? null
     });
+    this.persistState();
   }
 
   private async claimIssue(issue: Issue): Promise<Issue> {
@@ -686,6 +722,7 @@ export class Orchestrator {
     };
     this.state.retry_attempts.set(issueId, retry);
     this.state.claimed.add(issueId);
+    this.persistState();
   }
 
   private async onRetryTimer(issueId: string): Promise<void> {
@@ -703,6 +740,7 @@ export class Orchestrator {
     if (!issue) {
       this.state.claimed.delete(issueId);
       this.state.completed.add(issueId);
+      this.persistState();
       return;
     }
     if (!this.shouldDispatchIgnoringClaim(issue)) {
@@ -711,6 +749,7 @@ export class Orchestrator {
     }
     this.state.claimed.delete(issueId);
     this.dispatchIssue(issue, retry.attempt, retry.context);
+    this.persistState();
   }
 
   private shouldDispatchIgnoringClaim(issue: Issue): boolean {
@@ -727,6 +766,7 @@ export class Orchestrator {
     this.state.running.delete(issueId);
     this.state.claimed.delete(issueId);
     if (cleanupWorkspace) await this.options.workspaceManager.removeForIssue(entry.identifier);
+    this.persistState();
   }
 
   private availableGlobalSlots(): number {
@@ -772,6 +812,43 @@ export class Orchestrator {
       session_id: event.session_id,
       message: event.message
     });
+    this.persistState();
+  }
+
+  private persistState(): void {
+    const store = this.options.durableStore;
+    if (!store) return;
+    const snapshot = this.durableSnapshot();
+    this.persistenceChain = this.persistenceChain
+      .catch(() => undefined)
+      .then(() => store.save(snapshot))
+      .catch((error: unknown) => {
+        this.options.logger.warn("durable state save failed", { error: errorMessage(error) });
+      });
+  }
+
+  private async flushPersistence(): Promise<void> {
+    await this.persistenceChain.catch(() => undefined);
+  }
+
+  private durableSnapshot(): DurableStateSnapshot {
+    return {
+      schema_version: 1,
+      saved_at: new Date().toISOString(),
+      retry_attempts: [...this.state.retry_attempts.values()].map((retry) => ({
+        issue_id: retry.issue_id,
+        identifier: retry.identifier,
+        attempt: retry.attempt,
+        due_at_ms: retry.due_at_ms,
+        error: retry.error,
+        context: retry.context
+      })),
+      completed_issue_ids: [...this.state.completed],
+      issue_history: [...this.state.issue_history.values()],
+      recent_events: this.state.recent_events.slice(-200),
+      codex_totals: this.state.codex_totals,
+      codex_rate_limits: this.state.codex_rate_limits
+    };
   }
 }
 

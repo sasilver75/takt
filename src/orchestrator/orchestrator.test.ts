@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import type { DiscoveredPullRequest, PullRequestInspection, PullRequestPublisher, PullRequestTracker, SymphonyConfig } from "../domain.js";
+import type { DiscoveredPullRequest, DurableStateSnapshot, DurableStateStore, PullRequestInspection, PullRequestPublisher, PullRequestTracker, SymphonyConfig } from "../domain.js";
 import { createLogger } from "../observability/logger.js";
 import { FakeTracker, issue } from "../testing/fakes.js";
 import { LocalTracker } from "../testing/localTracker.js";
@@ -237,6 +237,46 @@ describe("orchestrator", () => {
     });
     await orchestrator.stop();
   });
+
+  test("restores durable retry queue and issue history on startup", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-durable-"));
+    const cfg = config(root, "node missing.js");
+    const saved: DurableStateSnapshot[] = [];
+    const durableStore: DurableStateStore = {
+      async load() {
+        return durableSnapshot(Date.now() + 60_000);
+      },
+      async save(snapshot) {
+        saved.push(snapshot);
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker: new FakeTracker([], [], []),
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      durableStore,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.start();
+
+    expect(orchestrator.snapshot()).toMatchObject({
+      counts: { retrying: 1, completed: 1 },
+      retrying: [{ issue_id: "retry-1", issue_identifier: "SAM-12", attempt: 2, context: "Fix failing checks" }]
+    });
+    expect(orchestrator.issueSnapshot("SAM-12")).toMatchObject({
+      status: "retrying",
+      last_error: "verify failed",
+      tracked: { github_pull_request: { number: 12 } }
+    });
+    await orchestrator.stop();
+    expect(saved.at(-1)).toMatchObject({
+      retry_attempts: [{ issue_id: "retry-1", identifier: "SAM-12", attempt: 2, context: "Fix failing checks" }],
+      completed_issue_ids: ["done-1"]
+    });
+  });
 });
 
 function config(root: string, command: string): SymphonyConfig {
@@ -345,6 +385,37 @@ function discoveredPullRequest(): DiscoveredPullRequest {
     title: "SAM-11: Recovered PR should not redispatch",
     created: false,
     issue_identifier: "SAM-11"
+  };
+}
+
+function durableSnapshot(dueAtMs: number): DurableStateSnapshot {
+  return {
+    schema_version: 1,
+    saved_at: new Date().toISOString(),
+    retry_attempts: [{ issue_id: "retry-1", identifier: "SAM-12", attempt: 2, due_at_ms: dueAtMs, error: "verify failed", context: "Fix failing checks" }],
+    completed_issue_ids: ["done-1"],
+    issue_history: [
+      {
+        issue_id: "retry-1",
+        issue_identifier: "SAM-12",
+        workspace_path: null,
+        restart_count: 1,
+        last_error: "verify failed",
+        recent_events: [],
+        tracked: {
+          github_pull_request: {
+            number: 12,
+            url: "https://github.test/acme/widgets/pull/12",
+            branch: "symphony/sam-12-durable-retry",
+            title: "SAM-12: Durable retry",
+            created: true
+          }
+        }
+      }
+    ],
+    recent_events: [],
+    codex_totals: { input_tokens: 1, output_tokens: 2, total_tokens: 3, seconds_running: 4 },
+    codex_rate_limits: null
   };
 }
 

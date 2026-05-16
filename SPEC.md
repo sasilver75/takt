@@ -1586,6 +1586,10 @@ After restart:
   - fresh polling of active issues
   - re-dispatching eligible work
 
+Implementations that ship the durable state extension MAY restore retry metadata and create fresh
+runtime timers from persisted due times. Live worker processes and app-server sessions are still not
+assumed recoverable.
+
 ### 14.4 Operator Intervention Points
 
 Operators can control behavior by:
@@ -2092,7 +2096,8 @@ Use the same validation profiles as Section 17:
   exposes the baseline endpoints/error semantics in Section 13.7 if shipped.
 - `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth.
-- TODO: Persist retry queue and session metadata across process restarts.
+- Durable state extension persists retry queue, issue history, PR metadata, and session summaries
+  across process restarts. Live worker processes are not required to survive restart.
 - TODO: Make observability settings configurable in workflow front matter without prescribing UI
   implementation details.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead

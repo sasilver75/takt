@@ -19,6 +19,12 @@ The service watches `WORKFLOW.md` and reloads config and prompt content without 
 
 If reload fails, Symphony logs `workflow reload failed` and keeps using the last known good config.
 
+## Durable State
+
+Symphony persists restart-meaningful orchestration state to `workspace.root/.symphony/state.json` with atomic JSON writes. The file contains retry entries, completed issue IDs, issue debug history, recent orchestrator events, token totals, and PR tracking metadata. It intentionally does not persist live process handles, raw tracker/GitHub credentials, Codex auth, or worker container state.
+
+On startup, Symphony restores the retry queue and issue history from that snapshot, then reconciles tracker and GitHub state before dispatching new work. Running Codex sessions are not resumed after a process restart; they become fresh attempts if tracker/GitHub reconciliation says the issue still needs work.
+
 ## Safety Posture
 
 This implementation treats Docker as the first-class worker runtime. `runtime.kind: docker` runs Codex app-server inside a per-issue container with the issue workspace mounted at `/workspace`; `runtime.kind: host` remains available for local debugging and deterministic tests.

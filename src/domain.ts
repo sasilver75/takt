@@ -280,6 +280,8 @@ export type RetryEntry = {
   context: string | null;
 };
 
+export type DurableRetryEntry = Omit<RetryEntry, "timer_handle">;
+
 export type RuntimeState = {
   poll_interval_ms: number;
   max_concurrent_agents: number;
@@ -310,4 +312,20 @@ export type IssueDebugRecord = {
   last_error: string | null;
   recent_events: RuntimeEvent[];
   tracked: Record<string, unknown>;
+};
+
+export type DurableStateSnapshot = {
+  schema_version: 1;
+  saved_at: string;
+  retry_attempts: DurableRetryEntry[];
+  completed_issue_ids: string[];
+  issue_history: IssueDebugRecord[];
+  recent_events: RuntimeEvent[];
+  codex_totals: TokenTotals & { seconds_running: number };
+  codex_rate_limits: unknown;
+};
+
+export type DurableStateStore = {
+  load(): Promise<DurableStateSnapshot | null>;
+  save(snapshot: DurableStateSnapshot): Promise<void>;
 };

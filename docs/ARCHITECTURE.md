@@ -22,6 +22,8 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
   - Launches `codex.command` through the selected worker runtime, hosts a short-lived Streamable HTTP MCP server for `symphony_linear`, registers its runtime-reachable URL with Codex for `linear_graphql`, speaks app-server JSON-RPC over stdio, handles approvals/user input/tool calls by policy, and streams events upward.
 - Coordination: `src/orchestrator/orchestrator.ts`
   - Owns mutable scheduler state, polling, dispatch, reconciliation, retry timers, token accounting, and runtime snapshots.
+- Durable state: `src/persistence/jsonStateStore.ts`
+  - Persists restart-meaningful scheduler metadata under `workspace.root/.symphony/state.json` and restores retry/history state before the first startup poll.
 - Observability and control: `src/observability/*`, `src/http/*`
   - Emits structured key/value logs and optionally exposes dashboard/API endpoints.
 - Deterministic factory harness: `src/harness/toyWebappFactory.test.ts`, `examples/toy-webapp`
@@ -35,6 +37,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - The Symphony Linear MCP server is hosted by the orchestrator. Host workers receive a loopback URL; Docker workers receive a `host.docker.internal` URL plus a per-run bearer-token env-var reference. Linear auth stays inside the orchestrator-owned tracker adapter.
 - Tracker secrets are removed from the Codex app-server environment and redacted from Symphony logs and status events. Workers are instructed to treat `.symphony` as orchestrator-owned wiring rather than task context.
 - GitHub publishing, discovery, and inspection credentials stay in the orchestrator. Workers produce commits plus a PR-ready manifest; Symphony owns branch push, PR creation/update, PR status/review inspection, Linear PR comments, review-state transition, restart recovery for open Symphony PRs, and follow-up requeue decisions.
+- Durable state stores scheduler metadata only: retry queue, completed issue IDs, issue history, recent events, token totals, and PR metadata. It must not contain raw Linear/GitHub secrets or Codex auth material.
 - Docker workers mount only the per-issue workspace and an ephemeral per-run Codex home containing auth material copied from the configured source. Operator plugin caches, app approvals, rollout state, shell history, `keys.txt`, and the repo root are not mounted or copied into the image/build context.
 - Issue identifiers are sanitized before they become directory names.
 - Secrets are accepted through config/env resolution but never logged.
