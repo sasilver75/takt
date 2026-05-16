@@ -1,0 +1,4 @@
+SAM-76 evidence artifact
+
+This file is intentionally left uncommitted under artifacts/ to validate Symphony artifact auto-publishing for PR evidence.
+Verification run: pnpm verify (passed) on 2026-05-16.
