@@ -42,7 +42,7 @@ hooks:
     git clone https://github.com/sasilver75/galatin-demo.git .
   before_run: |
     git fetch origin main
-    git merge --ff-only origin/main
+    git rebase origin/main
     git config user.name "Symphony Worker"
     git config user.email "symphony-worker@example.invalid"
     rm -rf .pnpm-store
