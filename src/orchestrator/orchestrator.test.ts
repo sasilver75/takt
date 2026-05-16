@@ -259,6 +259,131 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("does not requeue stale changes-requested reviews after a worker follow-up push", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-stale-review-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-stale-review", identifier: "SAM-13", state: "Todo", title: "Handle stale review" });
+    const tracker = new LocalTracker([activeIssue]);
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return { number: 13, url: "https://github.test/acme/widgets/pull/13", branch: "symphony/sam-13-handle-stale-review", title: "SAM-13: Handle stale review", created: published.length === 1 };
+      }
+    };
+    let inspectCount = 0;
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        inspectCount += 1;
+        return changesRequestedInspection(inspectCount === 1 ? "old-head-sha" : "new-head-sha");
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }} attempt={{ attempt }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => published.length === 1, "initial pull request publication");
+    await orchestrator.tick();
+    await waitFor(() => published.length === 2, "review follow-up publication");
+    await orchestrator.tick();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(published).toHaveLength(2);
+    expect(tracker.getIssue("i-pr-stale-review")?.state).toBe("Needs Human");
+    expect(orchestrator.issueSnapshot("SAM-13")).toMatchObject({
+      tracked: {
+        github_pull_request_status: { review_status: "changes_requested" },
+        github_pr_followup_reason: "GitHub review requested changes"
+      }
+    });
+    await orchestrator.stop();
+  });
+
+  test("requeues comment-only PR review feedback and includes comments in worker context", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-comments-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-comment-review", identifier: "SAM-14", state: "Todo", title: "Handle comment review" });
+    const tracker = new LocalTracker([activeIssue]);
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return { number: 14, url: "https://github.test/acme/widgets/pull/14", branch: "symphony/sam-14-handle-comment-review", title: "SAM-14: Handle comment review", created: published.length === 1 };
+      }
+    };
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        return commentOnlyInspection();
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }} attempt={{ attempt }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => published.length === 1, "initial pull request publication");
+    await orchestrator.tick();
+    await waitFor(() => published.length === 2, "comment follow-up publication");
+
+    expect(tracker.comments.some((comment) => comment.body.includes("GitHub review comments need attention"))).toBe(true);
+    const promptLog = await readFile(path.join(manager.workspacePath("SAM-14"), "prompts.log"), "utf8");
+    expect(promptLog).toContain("GitHub review comments need attention");
+    expect(promptLog).toContain("Please document the review-feedback loop.");
+    expect(promptLog).toContain("src/orchestrator/orchestrator.ts:line 42");
+    await orchestrator.stop();
+  });
+
   test("recovers open Symphony PRs after restart and suppresses duplicate dispatch", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-recover-"));
     const cfg = {
@@ -427,6 +552,76 @@ function failingInspection(): PullRequestInspection {
     checks: [{ name: "verify", status: "completed", conclusion: "failure", details_url: "https://github.test/checks/10" }],
     reviews: [],
     review_comments: []
+  };
+}
+
+function changesRequestedInspection(headSha: string): PullRequestInspection {
+  return {
+    number: 13,
+    url: "https://github.test/acme/widgets/pull/13",
+    branch: "symphony/sam-13-handle-stale-review",
+    title: "SAM-13: Handle stale review",
+    state: "open",
+    checks_status: "success",
+    review_status: "changes_requested",
+    head_sha: headSha,
+    mergeable_state: "clean",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: `PR #13 is open; checks=success; review=changes_requested at ${headSha}.`,
+    checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/13" }],
+    reviews: [
+      {
+        reviewer: "reviewer",
+        state: "CHANGES_REQUESTED",
+        submitted_at: "2026-05-16T05:30:00.000Z",
+        body: "Please address the review feedback.",
+        url: "https://github.test/review/13",
+        commit_id: "old-head-sha"
+      }
+    ],
+    review_comments: []
+  };
+}
+
+function commentOnlyInspection(): PullRequestInspection {
+  return {
+    number: 14,
+    url: "https://github.test/acme/widgets/pull/14",
+    branch: "symphony/sam-14-handle-comment-review",
+    title: "SAM-14: Handle comment review",
+    state: "open",
+    checks_status: "success",
+    review_status: "review_required",
+    head_sha: "comment-head-sha",
+    mergeable_state: "clean",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: "PR #14 is open; checks=success; review=review_required at comment-head-sha.",
+    checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/14" }],
+    reviews: [
+      {
+        reviewer: "reviewer",
+        state: "COMMENTED",
+        submitted_at: "2026-05-16T05:31:00.000Z",
+        body: "Please document the review-feedback loop.",
+        url: "https://github.test/review/14",
+        commit_id: "comment-head-sha"
+      }
+    ],
+    review_comments: [
+      {
+        author: "reviewer",
+        path: "src/orchestrator/orchestrator.ts",
+        line: 42,
+        body: "This needs an explicit regression test.",
+        url: "https://github.test/comment/14",
+        created_at: "2026-05-16T05:31:10.000Z",
+        updated_at: "2026-05-16T05:31:10.000Z",
+        commit_id: "comment-head-sha",
+        original_commit_id: "comment-head-sha"
+      }
+    ]
   };
 }
 

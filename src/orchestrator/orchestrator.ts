@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -405,8 +406,8 @@ export class Orchestrator {
         this.persistState();
         continue;
       }
-      const reason = pullRequestFollowupReason(inspection);
-      if (reason) await this.queuePullRequestFollowup(record, pullRequest, inspection, reason);
+      const feedback = pullRequestFollowupFeedback(inspection, readHandledPullRequestFollowupKeys(record));
+      if (feedback.length > 0) await this.queuePullRequestFollowup(record, pullRequest, inspection, feedback);
       else {
         await this.ensureIssueReviewState(record, null, "pull_request_reconcile", false);
         this.persistState();
@@ -418,10 +419,9 @@ export class Orchestrator {
     record: IssueDebugRecord,
     pullRequest: PublishedPullRequest,
     inspection: PullRequestInspection,
-    reason: string
+    feedback: PullRequestFeedback[]
   ): Promise<void> {
-    const actionKey = `followup:${pullRequestStatusKey(inspection)}`;
-    if (record.tracked.github_pr_last_followup_key === actionKey) return;
+    const reason = uniqueStrings(feedback.map((item) => item.reason)).join("; ");
     let issue: Issue | null = null;
     try {
       const refreshed = await this.options.tracker.fetchIssueStatesByIds([record.issue_id]);
@@ -488,7 +488,11 @@ export class Orchestrator {
     }
 
     const attempt = nextAttempt(record.restart_count === 0 ? null : record.restart_count);
-    record.tracked.github_pr_last_followup_key = actionKey;
+    const handledKeys = readHandledPullRequestFollowupKeys(record);
+    for (const item of feedback) handledKeys.add(item.key);
+    record.tracked.github_pr_followup_keys = [...handledKeys].sort();
+    record.tracked.github_pr_last_followup_key = `feedback:${feedback.map((item) => item.key).sort().join("|")}`;
+    record.tracked.github_pr_followup_reason = reason;
     record.tracked.github_pr_followup_context = context;
     this.state.completed.delete(record.issue_id);
     this.state.claimed.delete(record.issue_id);
@@ -988,11 +992,116 @@ function pullRequestStatusKey(inspection: PullRequestInspection): string {
   return [inspection.state, inspection.checks_status, inspection.review_status, inspection.head_sha ?? "no-sha"].join(":");
 }
 
-function pullRequestFollowupReason(inspection: PullRequestInspection): string | null {
-  const reasons: string[] = [];
-  if (inspection.checks_status === "failure") reasons.push("GitHub checks are failing");
-  if (inspection.review_status === "changes_requested") reasons.push("GitHub review requested changes");
-  return reasons.length > 0 ? reasons.join("; ") : null;
+type PullRequestFeedback = { key: string; reason: string };
+
+function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledKeys: Set<string>): PullRequestFeedback[] {
+  const feedback: PullRequestFeedback[] = [];
+  const failingChecks = actionableChecks(inspection);
+  if (failingChecks.length > 0) {
+    feedback.push({
+      key: feedbackKey("checks", {
+        head_sha: inspection.head_sha,
+        checks: failingChecks.map((check) => ({
+          name: check.name,
+          status: check.status,
+          conclusion: check.conclusion,
+          details_url: check.details_url
+        }))
+      }),
+      reason: "GitHub checks are failing"
+    });
+  }
+
+  for (const review of latestReviewsByReviewer(inspection.reviews, ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]).filter((review) => review.state === "CHANGES_REQUESTED")) {
+    feedback.push({
+      key: feedbackKey("review_changes", reviewIdentity(review)),
+      reason: "GitHub review requested changes"
+    });
+  }
+
+  if (inspection.review_status !== "approved") {
+    for (const review of latestReviewsByReviewer(inspection.reviews, ["COMMENTED"]).filter((review) => Boolean(review.body?.trim()))) {
+      feedback.push({
+        key: feedbackKey("review_comment", reviewIdentity(review)),
+        reason: "GitHub review comments need attention"
+      });
+    }
+    for (const comment of inspection.review_comments) {
+      feedback.push({
+        key: feedbackKey("inline_comment", {
+          author: comment.author,
+          path: comment.path,
+          line: comment.line,
+          created_at: comment.created_at,
+          updated_at: comment.updated_at,
+          commit_id: comment.commit_id,
+          original_commit_id: comment.original_commit_id,
+          url: comment.url,
+          body: comment.body
+        }),
+        reason: "GitHub inline review comments need attention"
+      });
+    }
+  }
+
+  const seen = new Set<string>();
+  return feedback.filter((item) => {
+    if (seen.has(item.key) || handledKeys.has(item.key)) return false;
+    seen.add(item.key);
+    return true;
+  });
+}
+
+function readHandledPullRequestFollowupKeys(record: IssueDebugRecord): Set<string> {
+  const values = new Set<string>();
+  const raw = record.tracked.github_pr_followup_keys;
+  if (Array.isArray(raw)) {
+    for (const value of raw) {
+      if (typeof value === "string" && value.trim()) values.add(value);
+    }
+  }
+  return values;
+}
+
+function actionableChecks(inspection: PullRequestInspection): PullRequestInspection["checks"] {
+  if (inspection.checks_status !== "failure") return [];
+  return inspection.checks.filter((check) => {
+    const conclusion = check.conclusion?.toLowerCase() ?? "";
+    return ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(conclusion);
+  });
+}
+
+function latestReviewsByReviewer(reviews: PullRequestInspection["reviews"], states: string[]): PullRequestInspection["reviews"] {
+  const allowedStates = new Set(states);
+  const latest = new Map<string, { review: PullRequestInspection["reviews"][number]; submittedAt: number }>();
+  for (const review of reviews) {
+    const state = review.state.toUpperCase();
+    if (!allowedStates.has(state)) continue;
+    const submittedAt = review.submitted_at ? Date.parse(review.submitted_at) : 0;
+    const existing = latest.get(review.reviewer);
+    if (!existing || submittedAt >= existing.submittedAt) latest.set(review.reviewer, { review: { ...review, state }, submittedAt });
+  }
+  return [...latest.values()].map((entry) => entry.review);
+}
+
+function reviewIdentity(review: PullRequestInspection["reviews"][number]): Record<string, unknown> {
+  return {
+    reviewer: review.reviewer,
+    state: review.state,
+    submitted_at: review.submitted_at,
+    commit_id: review.commit_id,
+    url: review.url,
+    body: review.body
+  };
+}
+
+function feedbackKey(prefix: string, value: unknown): string {
+  const hash = createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 24);
+  return `${prefix}:${hash}`;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
 function renderPullRequestFollowupContext(
@@ -1016,11 +1125,7 @@ function renderPullRequestFollowupContext(
     "- Commit the follow-up changes.",
     `- Update ${prReadyFile} so Symphony can update the existing PR.`
   ];
-  const failingChecks = inspection.checks.filter((check) => {
-    const status = check.status?.toLowerCase() ?? "unknown";
-    const conclusion = check.conclusion?.toLowerCase() ?? "";
-    return status !== "completed" || ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(conclusion);
-  });
+  const failingChecks = actionableChecks(inspection);
   if (failingChecks.length > 0) {
     lines.push("", "Check details:");
     for (const check of failingChecks.slice(0, 10)) {
@@ -1028,11 +1133,14 @@ function renderPullRequestFollowupContext(
       lines.push(`- ${check.name}: ${state || "unknown"}${check.details_url ? ` (${check.details_url})` : ""}`);
     }
   }
-  const changesRequestedReviews = inspection.reviews.filter((review) => review.state === "CHANGES_REQUESTED");
-  if (changesRequestedReviews.length > 0) {
+  const reviewSummaries = [
+    ...latestReviewsByReviewer(inspection.reviews, ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]).filter((review) => review.state === "CHANGES_REQUESTED"),
+    ...latestReviewsByReviewer(inspection.reviews, ["COMMENTED"]).filter((review) => Boolean(review.body?.trim()))
+  ];
+  if (reviewSummaries.length > 0) {
     lines.push("", "Review summaries:");
-    for (const review of changesRequestedReviews.slice(0, 10)) {
-      lines.push(`- ${review.reviewer}${review.submitted_at ? ` at ${review.submitted_at}` : ""}: ${singleLine(review.body ?? "Changes requested.")}`);
+    for (const review of reviewSummaries.slice(0, 10)) {
+      lines.push(`- ${review.reviewer} ${review.state}${review.submitted_at ? ` at ${review.submitted_at}` : ""}: ${singleLine(review.body ?? "Changes requested.")}`);
     }
   }
   if (inspection.review_comments.length > 0) {

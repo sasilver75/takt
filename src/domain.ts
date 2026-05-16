@@ -212,6 +212,7 @@ export type PullRequestReviewSummary = {
   submitted_at: string | null;
   body: string | null;
   url: string | null;
+  commit_id?: string | null;
 };
 
 export type PullRequestReviewCommentSummary = {
@@ -220,6 +221,10 @@ export type PullRequestReviewCommentSummary = {
   line: number | null;
   body: string;
   url: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  commit_id?: string | null;
+  original_commit_id?: string | null;
 };
 
 export type PullRequestInspection = {

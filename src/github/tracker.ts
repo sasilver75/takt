@@ -168,7 +168,8 @@ function readReviewSummary(value: unknown): PullRequestReviewSummary | null {
     state: readString(record.state)?.toUpperCase() ?? "UNKNOWN",
     submitted_at: readString(record.submitted_at),
     body: readString(record.body),
-    url: readString(record.html_url)
+    url: readString(record.html_url),
+    commit_id: readString(record.commit_id)
   };
 }
 
@@ -182,7 +183,11 @@ function readReviewCommentSummary(value: unknown): PullRequestReviewCommentSumma
     path: readString(record.path),
     line: readNumberOrNull(record.line) ?? readNumberOrNull(record.original_line),
     body,
-    url: readString(record.html_url)
+    url: readString(record.html_url),
+    created_at: readString(record.created_at),
+    updated_at: readString(record.updated_at),
+    commit_id: readString(record.commit_id),
+    original_commit_id: readString(record.original_commit_id)
   };
 }
 
