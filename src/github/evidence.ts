@@ -27,7 +27,7 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
     if (!config.enabled) throw new SymphonyError("github_disabled", "GitHub evidence publishing is disabled");
     if (!config.owner || !config.repo || !config.token) throw new SymphonyError("github_not_configured", "GitHub evidence publishing is not fully configured");
 
-    const body = renderEvidenceComment(input.pullRequest, input.manifest, input.workspacePath);
+    const body = renderEvidenceComment(input.pullRequest, input.manifest, input.workspacePath, { owner: config.owner, repo: config.repo });
     const existingCommentId = input.previousCommentId ?? (await this.findExistingEvidenceComment(input.pullRequest.number));
     const payload = existingCommentId
       ? await this.updateExistingComment(input.pullRequest.number, existingCommentId, body)
@@ -73,7 +73,12 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
   }
 }
 
-export function renderEvidenceComment(pullRequest: PublishedPullRequest, manifest: EvidenceManifest, workspacePath?: string): string {
+export function renderEvidenceComment(
+  pullRequest: PublishedPullRequest,
+  manifest: EvidenceManifest,
+  workspacePath?: string,
+  repository?: { owner: string | null; repo: string | null }
+): string {
   const lines = [
     SYMPHONY_EVIDENCE_COMMENT_MARKER,
     "## Symphony Worker Evidence",
@@ -96,20 +101,43 @@ export function renderEvidenceComment(pullRequest: PublishedPullRequest, manifes
   const artifacts = manifest.artifacts?.filter((artifact) => hasArtifactTarget(artifact, workspacePath)) ?? [];
   if (artifacts.length > 0) {
     lines.push("", "### Artifacts");
-    for (const artifact of artifacts.slice(0, 50)) lines.push(`- ${renderArtifact(artifact, workspacePath)}`);
+    for (const artifact of artifacts.slice(0, 50)) lines.push(`- ${renderArtifact(pullRequest, artifact, workspacePath, repository)}`);
   }
 
   if (manifest.notes?.trim()) lines.push("", "### Notes", manifest.notes.trim());
   return lines.join("\n");
 }
 
-function renderArtifact(artifact: EvidenceArtifact, workspacePath?: string): string {
+function renderArtifact(pullRequest: PublishedPullRequest, artifact: EvidenceArtifact, workspacePath?: string, repository?: { owner: string | null; repo: string | null }): string {
   const label = artifact.label?.trim() || artifact.kind?.trim() || "artifact";
   const normalizedPath = normalizeArtifactPath(artifact.path, workspacePath);
   const target = artifact.url?.trim() || normalizedPath || "";
   const description = artifact.description?.trim();
-  const renderedTarget = artifact.url?.trim() ? target : `\`${target}\``;
+  const renderedTarget = artifact.url?.trim() ? target : renderArtifactPathTarget(pullRequest, target, repository);
   return `${label}: ${renderedTarget}${description ? ` - ${singleLine(description)}` : ""}`;
+}
+
+function renderArtifactPathTarget(pullRequest: PublishedPullRequest, normalizedPath: string, repository?: { owner: string | null; repo: string | null }): string {
+  const url = artifactBlobUrl(pullRequest, normalizedPath, repository);
+  return url ? `[${escapeMarkdownText(normalizedPath)}](${url})` : `\`${normalizedPath}\``;
+}
+
+function artifactBlobUrl(pullRequest: PublishedPullRequest, normalizedPath: string, repository?: { owner: string | null; repo: string | null }): string | null {
+  const repoUrl = repository?.owner && repository.repo ? repositoryWebUrlFromPullRequest(pullRequest, repository.owner, repository.repo) : null;
+  if (!repoUrl) return null;
+  const branch = encodeURI(pullRequest.branch.trim());
+  const artifactPath = normalizedPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${repoUrl}/blob/${branch}/${artifactPath}`;
+}
+
+function repositoryWebUrlFromPullRequest(pullRequest: PublishedPullRequest, owner: string, repo: string): string | null {
+  const escapedOwner = escapeRegExp(owner);
+  const escapedRepo = escapeRegExp(repo);
+  const match = pullRequest.url.match(new RegExp(`^(https?://[^/]+/${escapedOwner}/${escapedRepo})/pull/\\d+(?:$|[/?#])`));
+  return match?.[1] ?? null;
 }
 
 function hasArtifactTarget(artifact: EvidenceArtifact, workspacePath?: string): boolean {
@@ -159,4 +187,12 @@ function readString(value: unknown): string | null {
 
 function singleLine(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function escapeMarkdownText(value: string): string {
+  return value.replace(/([\\[\]])/g, "\\$1");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

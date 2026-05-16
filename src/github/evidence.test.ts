@@ -37,6 +37,7 @@ describe("GitHub PR evidence publisher", () => {
       body: expect.stringContaining(SYMPHONY_EVIDENCE_COMMENT_MARKER)
     });
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("artifacts/SAM-9/home.png");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("https://github.test/acme/widgets/blob/symphony/sam-9/artifacts/SAM-9/home.png");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("npx playwright test");
   });
 
