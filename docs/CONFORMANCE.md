@@ -27,7 +27,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 
 | Extension | Implementation evidence | Test / validation evidence |
 | --- | --- | --- |
-| HTTP dashboard and JSON API | `src/http/server.ts`, `src/service.ts` | `src/http/server.test.ts` |
+| HTTP dashboard, issue drill-down pages, and JSON API | `src/http/server.ts`, `src/service.ts` | `src/http/server.test.ts` |
 | Hosted `linear_graphql` MCP bridge | `src/agent/linearGraphqlBridge.ts`, `src/agent/linearGraphqlMcp.ts`, `src/tracker/linear.ts` | `src/agent/linearGraphqlBridge.test.ts`, `src/agent/linearGraphqlMcp.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Durable state | `src/persistence/jsonStateStore.ts`, `src/orchestrator/orchestrator.ts` | `src/persistence/jsonStateStore.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | GitHub PR publishing, handoff-manifest hygiene, lifecycle reconciliation, and human-merge recovery | `src/github/publisher.ts`, `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/publisher.test.ts`, `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts` |
@@ -48,6 +48,6 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 ## Known Gaps And Watch Items
 
 - Mutating full-loop real integration checks are operator-run, not automatic CI gates, because they touch Linear/GitHub and require live credentials. A non-mutating readiness profile exists and reports skipped status unless explicitly enabled.
-- The HTTP dashboard is functional and state-backed, but intentionally minimal; richer drill-down history and artifact browsing remain product work.
+- The HTTP dashboard is functional and state-backed, including per-issue drill-down pages; richer long-term run history, full artifact browsing, and external artifact retention remain product work.
 - Workers can attach durable artifacts through committed files, or by listing small workspace-contained files/directories under `artifacts/` in the evidence manifest so Symphony uploads them to the PR branch. Large binary artifact retention, external object storage, video capture conventions, and trace viewers are not yet first-class orchestration features.
 - The spec's SSH worker appendix is not implemented; Docker is the first-class isolation runtime.

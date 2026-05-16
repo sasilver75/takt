@@ -82,6 +82,7 @@ Structured logs are written as stable `key=value` lines. Issue logs include `iss
 When the HTTP extension is enabled:
 
 - `GET /` returns a human-readable dashboard.
+- `GET /issues/<issue_identifier>` returns a human-readable issue drill-down with workspace, attempts, PR lifecycle, evidence, errors, and recent issue events.
 - `GET /api/v1/state` returns running sessions, retry queue, published PR status, token/runtime totals, and rate limits.
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
