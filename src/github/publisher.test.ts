@@ -34,6 +34,8 @@ describe("GitHub PR publisher", () => {
     await writeFile(path.join(workspace, "feature.txt"), "done\n");
     await git(workspace, "add", "feature.txt");
     await git(workspace, "commit", "-m", "Add feature");
+    await mkdir(path.join(workspace, "artifacts", "SAM-123"), { recursive: true });
+    await writeFile(path.join(workspace, "artifacts", "SAM-123", "home.png"), "fake screenshot\n");
     await writeFile(path.join(workspace, "SYMPHONY_PR_READY.json"), "{}\n");
     await writeFile(path.join(workspace, "SYMPHONY_EVIDENCE.json"), "{}\n");
 
@@ -51,7 +53,8 @@ describe("GitHub PR publisher", () => {
     const published = await publisher.publish({
       issue: issue({ identifier: "SAM-123", title: "Add publish loop", url: "https://linear.test/SAM-123" }),
       workspacePath: workspace,
-      manifest: { summary: "Implemented the publishing path.", verification: ["pnpm test"], risk: "Low" }
+      manifest: { summary: "Implemented the publishing path.", verification: ["pnpm test"], risk: "Low" },
+      evidenceManifest: { artifacts: [{ path: "artifacts/SAM-123/home.png", kind: "screenshot" }] }
     });
 
     expect(published).toMatchObject({

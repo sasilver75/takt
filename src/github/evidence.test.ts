@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import type { SymphonyConfig } from "../domain.js";
@@ -62,6 +64,44 @@ describe("GitHub PR evidence publisher", () => {
 
     expect(requests.map((request) => request.method)).toEqual(["GET", "PATCH"]);
     expect(requests[1]?.url).toBe("https://api.github.test/repos/acme/widgets/issues/comments/456");
+  });
+
+  test("uploads local artifact files under artifacts to the PR branch before commenting", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-evidence-upload-"));
+    await mkdir(path.join(workspace, "artifacts", "SAM-9"), { recursive: true });
+    await writeFile(path.join(workspace, "artifacts", "SAM-9", "report.txt"), "review evidence\n");
+    const requests: Array<{ method: string; url: string; body: unknown }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push({ method: String(init?.method ?? "GET"), url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (String(url).includes("/contents/artifacts/SAM-9/report.txt") && String(init?.method ?? "GET") === "GET") {
+        return jsonResponse({ message: "Not Found" }, 404);
+      }
+      if (String(init?.method ?? "GET") === "GET") return jsonResponse([]);
+      if (String(init?.method ?? "GET") === "PUT") return jsonResponse({ content: { path: "artifacts/SAM-9/report.txt" } });
+      return jsonResponse({ id: 321, html_url: "https://github.test/acme/widgets/pull/9#issuecomment-321" });
+    };
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+
+    await publisher.publish({
+      pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9", title: "SAM-9", created: true },
+      workspacePath: workspace,
+      manifest: {
+        summary: "Verified with a local report.",
+        artifacts: [{ kind: "report", path: "artifacts/SAM-9/report.txt", description: "Local reviewer report." }]
+      }
+    });
+
+    const put = requests.find((request) => request.method === "PUT");
+    expect(put?.url).toBe("https://api.github.test/repos/acme/widgets/contents/artifacts/SAM-9/report.txt");
+    expect(put?.body).toMatchObject({
+      branch: "symphony/sam-9",
+      content: Buffer.from("review evidence\n").toString("base64"),
+      message: "Add Symphony evidence artifact artifacts/SAM-9/report.txt"
+    });
+    const comment = requests.find((request) => request.method === "POST");
+    const body = String((comment?.body as { body?: unknown } | undefined)?.body ?? "");
+    expect(body).toContain("https://github.test/acme/widgets/blob/symphony/sam-9/artifacts/SAM-9/report.txt");
+    expect(body).not.toContain("Artifact Warnings");
   });
 
   test("recovers when the stored evidence comment id was deleted", async () => {

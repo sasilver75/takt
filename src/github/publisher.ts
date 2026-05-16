@@ -3,10 +3,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { Issue, PrReadyManifest, PublishedPullRequest, PullRequestPublisher, SymphonyConfig } from "../domain.js";
+import type { EvidenceManifest, Issue, PrReadyManifest, PublishedPullRequest, PullRequestPublisher, SymphonyConfig } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import { GitHubApiClient, type FetchLike } from "./client.js";
+import { localEvidenceArtifactRoots } from "./evidenceArtifacts.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,13 +22,13 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     this.api = new GitHubApiClient(getConfig, fetchImpl);
   }
 
-  async publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest }): Promise<PublishedPullRequest> {
+  async publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest; evidenceManifest?: EvidenceManifest | null }): Promise<PublishedPullRequest> {
     const config = this.getConfig().github;
     if (!config.enabled) throw new SymphonyError("github_disabled", "GitHub publishing is disabled");
     if (!config.owner || !config.repo || !config.token) throw new SymphonyError("github_not_configured", "GitHub publishing is not fully configured");
 
     const branch = branchName(config.branch_prefix, input.issue);
-    await ensureCleanWorkspace(input.workspacePath, [config.pr_ready_file, config.evidence_file]);
+    await ensureCleanWorkspace(input.workspacePath, [config.pr_ready_file, config.evidence_file], localEvidenceArtifactRoots(input.evidenceManifest, input.workspacePath));
     await git(input.workspacePath, ["fetch", config.remote, config.base_branch]);
     const baseRef = `FETCH_HEAD`;
     const ahead = Number(await gitOut(input.workspacePath, ["rev-list", "--count", `${baseRef}..HEAD`]));
@@ -128,15 +129,30 @@ export function branchName(prefix: string, issue: Issue): string {
   return `${prefix.replace(/\/+$/g, "")}/${slug || issue.identifier.toLowerCase()}`;
 }
 
-async function ensureCleanWorkspace(workspacePath: string, ignoredRootFiles: string[]): Promise<void> {
+async function ensureCleanWorkspace(workspacePath: string, ignoredRootFiles: string[], allowedDirtyPaths: string[] = []): Promise<void> {
   const ignored = new Set(ignoredRootFiles);
-  const status = await gitOut(workspacePath, ["status", "--porcelain"]);
+  const status = await gitOut(workspacePath, ["status", "--porcelain", "--untracked-files=all"]);
   const dirty = status
     .split("\n")
     .map((line) => line.trimEnd())
     .filter(Boolean)
-    .filter((line) => !ignored.has(line.slice(3)));
+    .filter((line) => {
+      const statusPath = gitStatusPath(line);
+      return statusPath && !ignored.has(statusPath) && !isAllowedDirtyPath(statusPath, allowedDirtyPaths);
+    });
   if (dirty.length > 0) throw new SymphonyError("github_dirty_workspace", "Workspace has uncommitted changes; worker must commit before PR publishing");
+}
+
+function gitStatusPath(line: string): string | null {
+  const raw = line.slice(3).trim();
+  if (!raw) return null;
+  const pathPart = raw.includes(" -> ") ? raw.split(" -> ").at(-1) ?? raw : raw;
+  return pathPart.replace(/^"|"$/g, "");
+}
+
+function isAllowedDirtyPath(statusPath: string, allowedDirtyPaths: string[]): boolean {
+  const normalizedStatusPath = path.posix.normalize(statusPath.replace(/\\/g, "/"));
+  return allowedDirtyPaths.some((allowedPath) => normalizedStatusPath === allowedPath || normalizedStatusPath.startsWith(`${allowedPath.replace(/\/+$/g, "")}/`));
 }
 
 async function createAskpass(token: string): Promise<string> {

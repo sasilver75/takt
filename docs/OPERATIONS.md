@@ -54,7 +54,7 @@ When `github.enabled: true`, the issue-to-PR loop is:
 
 1. Symphony moves the issue to `tracker.claim_state` before launching the worker.
 2. The worker implements, verifies, commits, and writes `github.pr_ready_file` in the workspace root.
-3. If useful, the worker writes `github.evidence_file` with reviewer evidence such as app URLs, verification commands, screenshots, traces, logs, or reports. Durable artifact files listed by path should be committed with the worker changes. Symphony renders repository-relative artifact paths as PR-branch links and adds artifact warnings when a listed path is missing, invalid, outside the workspace, or not tracked by git at publish time.
+3. If useful, the worker writes `github.evidence_file` with reviewer evidence such as app URLs, verification commands, screenshots, traces, logs, or reports. Symphony renders repository-relative artifact paths as PR-branch links. Small local files or directories listed under `artifacts/` may be left uncommitted; Symphony allows those paths through the clean-workspace gate and uploads the discovered files to the PR branch before posting evidence. Other durable artifact files should be committed with the worker changes. Symphony adds artifact warnings when a listed path is missing, invalid, outside the workspace, too large to upload, or not available on the PR branch.
 4. Symphony pushes a branch named from `github.branch_prefix` and the issue identifier/title.
 5. Symphony creates or updates a GitHub PR against `github.base_branch`.
 6. Symphony publishes evidence as a sticky PR conversation comment, comments the PR URL in Linear, and moves the issue to `tracker.review_state`.
@@ -84,7 +84,7 @@ When the HTTP extension is enabled:
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
 - `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live runtime-reachable MCP bridge, and was used by a worker. Tracker secret values and MCP bearer tokens are redacted before event payloads are recorded.
-- PR rows include evidence comment links and manifest summaries when a worker writes `github.evidence_file`, so operators can see artifact/app/check counts from the dashboard and `/api/v1/state`.
+- PR rows include evidence comment links and manifest summaries when a worker writes `github.evidence_file`, so operators can see artifact/app/check counts from the dashboard and `/api/v1/state`. Evidence file auto-publishing is intentionally bounded to workspace-contained paths under `artifacts/`, with a 10 MiB per-file limit.
 
 ## Real Integration
 

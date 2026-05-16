@@ -222,7 +222,7 @@ export type DiscoveredPullRequest = PublishedPullRequest & {
 };
 
 export type PullRequestPublisher = {
-  publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest }): Promise<PublishedPullRequest>;
+  publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest; evidenceManifest?: EvidenceManifest | null }): Promise<PublishedPullRequest>;
 };
 
 export type PullRequestLifecycleState = "open" | "merged" | "closed";

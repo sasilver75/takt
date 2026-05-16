@@ -750,7 +750,8 @@ export class Orchestrator {
     try {
       const manifest = await readPrReadyManifest(workspacePath, config.github.pr_ready_file);
       if (!manifest) return false;
-      const published = await this.options.pullRequestPublisher.publish({ issue, workspacePath, manifest });
+      const evidenceManifest = await this.readEvidenceManifestForPublish(workspacePath, config.github.evidence_file);
+      const published = await this.options.pullRequestPublisher.publish({ issue, workspacePath, manifest, evidenceManifest });
       const record = this.ensureRecord(issue);
       record.tracked.github_pull_request = published;
       await this.publishPullRequestEvidence(record, published, workspacePath);
@@ -825,6 +826,14 @@ export class Orchestrator {
         issue_identifier: record.issue_identifier,
         message
       });
+    }
+  }
+
+  private async readEvidenceManifestForPublish(workspacePath: string, fileName: string): Promise<EvidenceManifest | null> {
+    try {
+      return await readEvidenceManifest(workspacePath, fileName);
+    } catch {
+      return null;
     }
   }
 

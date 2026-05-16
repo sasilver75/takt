@@ -1,14 +1,16 @@
 import { execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { EvidenceArtifact, EvidenceManifest, PullRequestEvidencePublication, PullRequestEvidencePublisher, PublishedPullRequest, SymphonyConfig } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import { GitHubApiClient, type FetchLike } from "./client.js";
+import { localEvidenceArtifactFiles, normalizeEvidenceArtifactPath } from "./evidenceArtifacts.js";
 
 export const SYMPHONY_EVIDENCE_COMMENT_MARKER = "<!-- symphony:evidence -->";
 const execFileAsync = promisify(execFile);
+const MAX_EVIDENCE_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePublisher {
   private readonly api: GitHubApiClient;
@@ -31,7 +33,11 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
     if (!config.enabled) throw new SymphonyError("github_disabled", "GitHub evidence publishing is disabled");
     if (!config.owner || !config.repo || !config.token) throw new SymphonyError("github_not_configured", "GitHub evidence publishing is not fully configured");
 
-    const artifactWarnings = await evidenceArtifactWarnings(input.workspacePath, input.manifest);
+    const artifactPublication = await this.publishLocalArtifacts(input.pullRequest, input.workspacePath, input.manifest);
+    const artifactWarnings = [
+      ...artifactPublication.warnings,
+      ...(await evidenceArtifactWarnings(input.workspacePath, input.manifest, artifactPublication.uploadedPaths))
+    ];
     const body = renderEvidenceComment(input.pullRequest, input.manifest, input.workspacePath, { owner: config.owner, repo: config.repo }, artifactWarnings);
     const existingCommentId = input.previousCommentId ?? (await this.findExistingEvidenceComment(input.pullRequest.number));
     const payload = existingCommentId
@@ -41,6 +47,53 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
     const url = readString(payload.html_url);
     this.logger.info("github pr evidence published", { pr_number: input.pullRequest.number, pr_url: input.pullRequest.url, comment_id: commentId, comment_url: url });
     return { comment_id: commentId, url };
+  }
+
+  private async publishLocalArtifacts(
+    pullRequest: PublishedPullRequest,
+    workspacePath: string,
+    manifest: EvidenceManifest
+  ): Promise<{ uploadedPaths: Set<string>; warnings: string[] }> {
+    const config = this.getConfig().github;
+    const uploadedPaths = new Set<string>();
+    const warnings: string[] = [];
+    for (const artifactFile of await localEvidenceArtifactFiles(manifest, workspacePath)) {
+      try {
+        const info = await stat(artifactFile.sourcePath);
+        if (info.size > MAX_EVIDENCE_UPLOAD_BYTES) {
+          warnings.push(`Artifact path was not uploaded because it is larger than ${MAX_EVIDENCE_UPLOAD_BYTES} bytes: ${artifactFile.repositoryPath}`);
+          continue;
+        }
+        const content = await readFile(artifactFile.sourcePath);
+        const sha = await this.findExistingContentSha(artifactFile.repositoryPath, pullRequest.branch);
+        await this.api.request("PUT", `/repos/${config.owner}/${config.repo}/contents/${contentRoutePath(artifactFile.repositoryPath)}`, {
+          message: `Add Symphony evidence artifact ${artifactFile.repositoryPath}`,
+          content: content.toString("base64"),
+          branch: pullRequest.branch,
+          ...(sha ? { sha } : {})
+        });
+        uploadedPaths.add(artifactFile.repositoryPath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push(`Artifact path could not be uploaded to the PR branch: ${artifactFile.repositoryPath} (${singleLine(message)})`);
+        this.logger.warn("github pr evidence artifact upload failed", { pr_number: pullRequest.number, artifact_path: artifactFile.repositoryPath, error: message });
+      }
+    }
+    return { uploadedPaths, warnings };
+  }
+
+  private async findExistingContentSha(repositoryPath: string, branch: string): Promise<string | null> {
+    const config = this.getConfig().github;
+    try {
+      const payload = await this.api.request<Record<string, unknown>>(
+        "GET",
+        `/repos/${config.owner}/${config.repo}/contents/${contentRoutePath(repositoryPath)}?ref=${encodeURIComponent(branch)}`
+      );
+      return typeof payload.sha === "string" ? payload.sha : null;
+    } catch (error) {
+      if (isGitHubNotFound(error)) return null;
+      throw error;
+    }
   }
 
   private async findExistingEvidenceComment(number: number): Promise<number | null> {
@@ -119,13 +172,13 @@ export function renderEvidenceComment(
   return lines.join("\n");
 }
 
-async function evidenceArtifactWarnings(workspacePath: string, manifest: EvidenceManifest): Promise<string[]> {
+async function evidenceArtifactWarnings(workspacePath: string, manifest: EvidenceManifest, uploadedPaths: Set<string> = new Set()): Promise<string[]> {
   const warnings: string[] = [];
   for (const artifact of manifest.artifacts ?? []) {
     if (artifact.url?.trim()) continue;
     const rawPath = artifact.path?.trim();
     if (!rawPath) continue;
-    const normalizedPath = normalizeArtifactPath(rawPath, workspacePath);
+    const normalizedPath = normalizeEvidenceArtifactPath(rawPath, workspacePath);
     if (!normalizedPath) {
       warnings.push(`Artifact path cannot be linked because it is outside the workspace or invalid: ${rawPath}`);
       continue;
@@ -137,7 +190,7 @@ async function evidenceArtifactWarnings(workspacePath: string, manifest: Evidenc
       warnings.push(`Artifact path was not found in the worker workspace at publish time: ${normalizedPath}`);
       continue;
     }
-    if (!(await isGitTracked(workspacePath, normalizedPath))) {
+    if (!uploadedPaths.has(normalizedPath) && !(await isGitTracked(workspacePath, normalizedPath))) {
       warnings.push(`Artifact path is not tracked by git at publish time, so the PR branch link may be unavailable: ${normalizedPath}`);
     }
   }
@@ -155,7 +208,7 @@ async function isGitTracked(workspacePath: string, normalizedPath: string): Prom
 
 function renderArtifact(pullRequest: PublishedPullRequest, artifact: EvidenceArtifact, workspacePath?: string, repository?: { owner: string | null; repo: string | null }): string {
   const label = artifact.label?.trim() || artifact.kind?.trim() || "artifact";
-  const normalizedPath = normalizeArtifactPath(artifact.path, workspacePath);
+  const normalizedPath = normalizeEvidenceArtifactPath(artifact.path, workspacePath);
   const target = artifact.url?.trim() || normalizedPath || "";
   const description = artifact.description?.trim();
   const renderedTarget = artifact.url?.trim() ? target : renderArtifactPathTarget(pullRequest, target, repository);
@@ -186,31 +239,7 @@ function repositoryWebUrlFromPullRequest(pullRequest: PublishedPullRequest, owne
 }
 
 function hasArtifactTarget(artifact: EvidenceArtifact, workspacePath?: string): boolean {
-  return Boolean(artifact.url?.trim() || normalizeArtifactPath(artifact.path, workspacePath));
-}
-
-function normalizeArtifactPath(value: string | undefined, workspacePath?: string): string | null {
-  const raw = value?.trim();
-  if (!raw) return null;
-  if (/^[A-Za-z]:[\\/]/.test(raw)) return null;
-  let candidate = raw;
-  if (path.isAbsolute(raw)) {
-    if (workspacePath && isPathInside(workspacePath, raw)) {
-      candidate = path.relative(workspacePath, raw);
-    } else if (raw === "/workspace" || raw.startsWith("/workspace/")) {
-      candidate = raw.slice("/workspace/".length);
-    } else {
-      return null;
-    }
-  }
-  const normalized = path.posix.normalize(candidate.replace(/\\/g, "/"));
-  if (normalized === "." || normalized === ".." || normalized.startsWith("../") || path.posix.isAbsolute(normalized)) return null;
-  return normalized;
-}
-
-function isPathInside(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return Boolean(artifact.url?.trim() || normalizeEvidenceArtifactPath(artifact.path, workspacePath));
 }
 
 function isGitHubNotFound(error: unknown): boolean {
@@ -240,4 +269,12 @@ function escapeMarkdownText(value: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function contentRoutePath(repositoryPath: string): string {
+  return repositoryPath
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }

@@ -163,8 +163,10 @@ describe("orchestrator", () => {
     };
     const activeIssue = issue({ id: "i-pr-evidence", identifier: "SAM-18", state: "Todo", title: "Publish evidence" });
     const tracker = new LocalTracker([activeIssue]);
+    const prPublishInputs: unknown[] = [];
     const publisher: PullRequestPublisher = {
-      async publish() {
+      async publish(input) {
+        prPublishInputs.push(input);
         return { number: 18, url: "https://github.test/acme/widgets/pull/18", branch: "symphony/sam-18-publish-evidence", title: "SAM-18: Publish evidence", created: true };
       }
     };
@@ -196,6 +198,11 @@ describe("orchestrator", () => {
         summary: "Verified with Playwright.",
         verification: ["pnpm test", "npx playwright test"],
         app_urls: ["http://127.0.0.1:3000"],
+        artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
+      }
+    });
+    expect(prPublishInputs[0]).toMatchObject({
+      evidenceManifest: {
         artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
       }
     });

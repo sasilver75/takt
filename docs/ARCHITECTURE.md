@@ -15,7 +15,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - PR lifecycle tracking: `src/github/tracker.ts`
   - Discovers open Symphony PRs by branch prefix after restart, then inspects PRs, head check runs, top-level PR conversation comments, reviews, inline review comments, and unresolved review threads so the orchestrator can decide whether to wait for humans, requeue worker follow-up, or record terminal PR state.
 - PR evidence publishing: `src/github/evidence.ts`
-  - Reads worker evidence manifests after PR publication and creates or updates a sticky PR comment with verification commands, app URLs, and artifact pointers.
+  - Reads worker evidence manifests after PR publication, publishes bounded local files under `artifacts/` to the PR branch, and creates or updates a sticky PR comment with verification commands, app URLs, and artifact pointers.
 - PR merging: `src/github/merger.ts`
   - Optionally merges approved, passing, clean PRs using orchestrator-held GitHub credentials and the inspected head SHA, then deletes the worker branch and moves the tracker issue to the configured completion state.
 - Workspace execution boundary: `src/workspace/manager.ts`
