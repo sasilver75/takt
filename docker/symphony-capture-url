@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "usage: symphony-capture-url <url> <output-path> [width,height]" >&2
+  exit 2
+fi
+
+url="$1"
+output_path="$2"
+window_size="${3:-1440,1000}"
+log_path="$(mktemp -t symphony-capture-url.XXXXXX)"
+trap 'rm -f "$log_path"' EXIT
+
+mkdir -p "$(dirname "$output_path")"
+if ! chromium \
+  --headless=new \
+  --no-sandbox \
+  --disable-gpu \
+  --window-size="$window_size" \
+  --screenshot="$output_path" \
+  "$url" >"$log_path" 2>&1; then
+  cat "$log_path" >&2
+  exit 1
+fi

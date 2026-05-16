@@ -37,6 +37,8 @@ The default Docker worker image can be built with:
 docker build -f docker/codex-worker.Dockerfile -t symphony-codex-worker:latest .
 ```
 
+The worker image includes Chromium plus `symphony-capture-url`, a small headless screenshot helper. Workers should still prefer a target repository's own Playwright/Cypress/browser tests when present, but the helper gives every Docker worker a baseline way to capture reviewer-visible screenshots under `artifacts/`.
+
 The current safety posture is:
 
 - Codex command execution and file-change approval requests are auto-approved for the session.

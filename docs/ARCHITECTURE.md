@@ -21,7 +21,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - Workspace execution boundary: `src/workspace/manager.ts`
   - Maps issue identifiers to sanitized workspace keys, enforces root containment, and runs lifecycle hooks with timeouts.
 - Worker runtime boundary: `src/runtime/workerRuntime.ts`
-  - Creates a per-run runtime lease. Docker is the first-class runtime: Codex app-server runs in a per-issue container with the workspace mounted at `/workspace`, unique runtime env/ports, and deterministic cleanup. Host runtime remains for local tests and debugging.
+  - Creates a per-run runtime lease. Docker is the first-class runtime: Codex app-server runs in a per-issue container with the workspace mounted at `/workspace`, unique runtime env/ports, Chromium-based screenshot capability, and deterministic cleanup. Host runtime remains for local tests and debugging.
 - Agent execution: `src/agent/*`
   - Launches `codex.command` through the selected worker runtime, hosts a short-lived Streamable HTTP MCP server for `symphony_linear`, registers its runtime-reachable URL with Codex for `linear_graphql`, speaks app-server JSON-RPC over stdio, handles approvals/user input/tool calls by policy, and streams events upward.
 - Coordination: `src/orchestrator/orchestrator.ts`
