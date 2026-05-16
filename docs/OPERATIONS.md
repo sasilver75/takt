@@ -89,7 +89,14 @@ When the HTTP extension is enabled:
 
 The deterministic Vitest suite uses fake Linear/local tracker and fake Codex app-server harnesses. `pnpm test:factory` is the highest-signal local check: it copies `examples/toy-webapp` into an isolated workspace, lets a scripted app-server modify backend and frontend TypeScript, handles tool/approval requests, compiles the resulting app, and validates handoff status.
 
-Live Linear/Codex checks are explicit operator actions because they require credentials, network access, and permission to touch real external systems.
+Live Linear/Codex checks are explicit operator actions because they require credentials, network access, and permission to touch real external systems. The non-mutating preflight profile is skip-visible by default:
+
+```bash
+pnpm integration:live
+SYMPHONY_LIVE_INTEGRATION=1 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm integration:live -- ./examples/WORKFLOW.md
+```
+
+Without `SYMPHONY_LIVE_INTEGRATION=1`, the command prints `SKIP` and exits successfully. When enabled, it loads the workflow, validates dispatch config, reads the configured Linear candidate queue, and reads GitHub repository metadata when `github.enabled` is true. It does not transition issues, comment on tickets, push branches, open PRs, or run Codex workers. Mutating full-loop checks remain controlled operator runs.
 
 Live runs performed on May 15, 2026:
 
@@ -117,4 +124,5 @@ Before production use:
 - `pnpm test`: runs unit and deterministic integration tests.
 - `pnpm test:factory`: runs only the toy web-app production-factory harness.
 - `pnpm toy:typecheck`: typechecks the toy frontend/backend fixture.
+- `pnpm integration:live`: reports a skipped real-integration profile by default; with `SYMPHONY_LIVE_INTEGRATION=1`, performs non-mutating live Linear/GitHub readiness checks.
 - `pnpm verify`: runs the full local gate used by CI.

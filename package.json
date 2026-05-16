@@ -16,6 +16,7 @@
     "toy:build": "tsc -p examples/toy-webapp/tsconfig.json",
     "toy:typecheck": "tsc -p examples/toy-webapp/tsconfig.json --noEmit",
     "verify": "pnpm typecheck && pnpm test && pnpm toy:typecheck && pnpm build && pnpm toy:build",
+    "integration:live": "node --import tsx src/integration/liveProfile.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "codex:generate": "codex app-server generate-ts --out src/codex/generated && codex app-server generate-json-schema --out schema/codex-app-server"
   },

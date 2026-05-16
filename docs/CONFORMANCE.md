@@ -34,17 +34,19 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Policy-gated GitHub merge extension | `src/github/merger.ts`, `src/orchestrator/orchestrator.ts` | `src/github/merger.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Docker-first worker runtime | `src/runtime/workerRuntime.ts`, `docker/codex-worker.Dockerfile`, `docs/OPERATIONS.md` | `src/runtime/workerRuntime.test.ts`, live `SAM-71` run |
 | PR follow-up from checks/comments/reviews/threads | `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts`, live PR `#3` |
+| Skip-visible real integration profile | `src/integration/liveProfile.ts`, `package.json`, `docs/OPERATIONS.md` | `src/integration/liveProfile.test.ts`; `pnpm integration:live` reports `SKIP` unless explicitly enabled |
 
 ## Operational Validation
 
 - Local deterministic gate: `pnpm verify`.
 - App-shaped factory harness: `pnpm test:factory`.
+- Non-mutating live readiness profile: `pnpm integration:live`, explicitly enabled with `SYMPHONY_LIVE_INTEGRATION=1`.
 - Live Linear/Codex/Docker history: `docs/OPERATIONS.md`.
 - Latest live PR loop evidence: PR `#4`, sticky evidence comment `#issuecomment-4467788558`.
 
 ## Known Gaps And Watch Items
 
-- Real integration checks are operator-run, not automatic CI gates, because they mutate Linear/GitHub and require live credentials.
+- Mutating full-loop real integration checks are operator-run, not automatic CI gates, because they touch Linear/GitHub and require live credentials. A non-mutating readiness profile exists and reports skipped status unless explicitly enabled.
 - The HTTP dashboard is functional and state-backed, but intentionally minimal; richer drill-down history and artifact browsing remain product work.
 - Workers can attach durable artifacts through committed files and evidence manifests, and Symphony warns when listed artifact paths are missing or not tracked. Large binary artifact retention, external object storage, video capture conventions, and trace viewers are not yet first-class orchestration features.
 - The spec's SSH worker appendix is not implemented; Docker is the first-class isolation runtime.

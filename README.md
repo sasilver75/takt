@@ -11,6 +11,7 @@ pnpm test
 pnpm test:factory
 pnpm build
 pnpm verify
+pnpm integration:live
 docker build -f docker/codex-worker.Dockerfile -t symphony-codex-worker:latest .
 pnpm dev ./examples/WORKFLOW.md --port 0
 ```
@@ -53,3 +54,8 @@ Restart-meaningful orchestration state is persisted under `workspace.root/.symph
 4. Modifies both backend and frontend TypeScript.
 5. Verifies the changed app with `tsc` from outside the repo tree.
 6. Confirms Symphony status snapshots show handoff/completion state.
+
+`pnpm integration:live` is the explicit real-integration profile. It reports `SKIP` unless
+`SYMPHONY_LIVE_INTEGRATION=1` is set. When enabled, it performs non-mutating live checks: workflow
+load, dispatch config validation, Linear candidate read, and GitHub repository metadata read when
+`github.enabled` is true.
