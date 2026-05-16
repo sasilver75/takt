@@ -13,6 +13,7 @@ pnpm build
 pnpm verify
 pnpm integration:live
 docker build -f docker/codex-worker.Dockerfile -t symphony-codex-worker:latest .
+pnpm dev ./examples/WORKFLOW.md --reconcile-once
 pnpm dev ./examples/WORKFLOW.md --port 0
 ```
 

@@ -959,6 +959,57 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("reconcileOnce runs PR lifecycle reconciliation without dispatching candidate work", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-reconcile-once-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      tracker: {
+        ...config(root, "node missing.js").tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human",
+        terminal_states: ["Done"]
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token",
+        merge: { ...githubMergeDisabled(), enabled: false, complete_state: "Done" }
+      }
+    };
+    const reviewIssue = issue({ id: "i-pr-reconcile-once", identifier: "SAM-22", state: "Needs Human", title: "Merged while offline" });
+    const readyIssue = issue({ id: "i-ready-reconcile-once", identifier: "SAM-23", state: "Todo", title: "Should not dispatch" });
+    const tracker = new LocalTracker([reviewIssue, readyIssue]);
+    const pullRequestTracker: PullRequestTracker = {
+      async discoverManaged() {
+        return [mergedDiscoveredPullRequest()];
+      },
+      async inspect() {
+        return mergedInspection();
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.start({ schedule: false });
+    await orchestrator.reconcileOnce();
+
+    expect(tracker.getIssue("i-pr-reconcile-once")?.state).toBe("Done");
+    expect(tracker.getIssue("i-ready-reconcile-once")?.state).toBe("Todo");
+    expect(orchestrator.snapshot()).toMatchObject({
+      counts: { running: 0, retrying: 0 }
+    });
+    await orchestrator.stop();
+  });
+
   test("ignores restored PR tracking outside the current branch prefix", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-prefix-"));
     const cfg = {

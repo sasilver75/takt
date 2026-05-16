@@ -9,6 +9,7 @@ import { errorMessage } from "./errors.js";
 type CliArgs = {
   workflowPath: string | null;
   port: number | null;
+  reconcileOnce: boolean;
 };
 
 export type CliService = {
@@ -30,11 +31,15 @@ export async function startCli(options: StartCliOptions = {}): Promise<CliServic
   const workflowPath = selectWorkflowPath(args.workflowPath, options.cwd);
   await access(workflowPath);
   const logger = options.logger ?? createLogger();
-  const serviceOptions: SymphonyServiceOptions = { workflowPath, port: args.port, logger };
+  const serviceOptions: SymphonyServiceOptions = { workflowPath, port: args.port, logger, runMode: args.reconcileOnce ? "reconcile_once" : "daemon" };
   const service = options.serviceFactory?.(serviceOptions) ?? new SymphonyService(serviceOptions);
   const started = await service.start();
   if (started.http) {
     logger.info("symphony dashboard available", { url: `http://${started.http.host}:${started.http.port}/` });
+  }
+  if (args.reconcileOnce) {
+    await service.stop();
+    return service;
   }
   if (options.installSignalHandlers === false) return service;
   const shutdown = async (): Promise<void> => {
@@ -59,6 +64,7 @@ export async function runCli(options: StartCliOptions = {}): Promise<number> {
 export function parseCliArgs(argv: string[]): CliArgs {
   let workflowPath: string | null = null;
   let port: number | null = null;
+  let reconcileOnce = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--port") {
@@ -70,6 +76,8 @@ export function parseCliArgs(argv: string[]): CliArgs {
       const parsed = Number(arg.slice("--port=".length));
       if (!Number.isInteger(parsed) || parsed < 0) throw new Error("--port requires a non-negative integer");
       port = parsed;
+    } else if (arg === "--reconcile-once") {
+      reconcileOnce = true;
     } else if (arg?.startsWith("-")) {
       throw new Error(`Unknown option: ${arg}`);
     } else if (!workflowPath) {
@@ -78,7 +86,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
       throw new Error(`Unexpected positional argument: ${arg}`);
     }
   }
-  return { workflowPath, port };
+  return { workflowPath, port, reconcileOnce };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

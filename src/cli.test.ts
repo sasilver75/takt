@@ -9,9 +9,11 @@ describe("CLI", () => {
   test("parses positional workflow path and port override", () => {
     expect(parseCliArgs(["./examples/WORKFLOW.md", "--port", "8787"])).toEqual({
       workflowPath: "./examples/WORKFLOW.md",
-      port: 8787
+      port: 8787,
+      reconcileOnce: false
     });
-    expect(parseCliArgs(["--port=0"])).toEqual({ workflowPath: null, port: 0 });
+    expect(parseCliArgs(["--port=0"])).toEqual({ workflowPath: null, port: 0, reconcileOnce: false });
+    expect(parseCliArgs(["--reconcile-once"])).toEqual({ workflowPath: null, port: null, reconcileOnce: true });
     expect(() => parseCliArgs(["--port", "nope"])).toThrow("--port requires a non-negative integer");
     expect(() => parseCliArgs(["--unknown"])).toThrow("Unknown option: --unknown");
     expect(() => parseCliArgs(["one.md", "two.md"])).toThrow("Unexpected positional argument: two.md");
@@ -34,8 +36,39 @@ describe("CLI", () => {
 
     expect(startedOptions[0]).toMatchObject({
       workflowPath: path.join(dir, "WORKFLOW.md"),
-      port: 0
+      port: 0,
+      runMode: "daemon"
     });
+  });
+
+  test("reconcile-once starts service in reconcile mode and stops immediately", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-cli-reconcile-"));
+    await writeFile(path.join(dir, "WORKFLOW.md"), "---\ntracker:\n  project_slug: demo\n---\nbody\n");
+    const startedOptions: SymphonyServiceOptions[] = [];
+    let stopped = false;
+
+    await startCli({
+      argv: ["--reconcile-once"],
+      cwd: dir,
+      installSignalHandlers: false,
+      serviceFactory: (options) => {
+        startedOptions.push(options);
+        return {
+          async start() {
+            return {};
+          },
+          async stop() {
+            stopped = true;
+          }
+        };
+      }
+    });
+
+    expect(startedOptions[0]).toMatchObject({
+      workflowPath: path.join(dir, "WORKFLOW.md"),
+      runMode: "reconcile_once"
+    });
+    expect(stopped).toBe(true);
   });
 
   test("returns nonzero and writes startup errors for missing workflow files", async () => {

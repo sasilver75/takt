@@ -49,6 +49,10 @@ export type OrchestratorOptions = {
   durableStore?: DurableStateStore | null | undefined;
 };
 
+export type OrchestratorStartOptions = {
+  schedule?: boolean;
+};
+
 export class Orchestrator {
   readonly state: RuntimeState;
   private tickTimer: NodeJS.Timeout | null = null;
@@ -73,10 +77,10 @@ export class Orchestrator {
     };
   }
 
-  async start(): Promise<void> {
+  async start(options: OrchestratorStartOptions = {}): Promise<void> {
     await this.restoreDurableState();
     await this.startupCleanup();
-    this.scheduleTick(0);
+    if (options.schedule !== false) this.scheduleTick(0);
   }
 
   async stop(): Promise<void> {
@@ -110,10 +114,7 @@ export class Orchestrator {
     if (this.ticking || this.stopped) return;
     this.ticking = true;
     try {
-      this.notifyConfigReload(this.options.getConfig());
-      await this.reconcileRunningIssues();
-      await this.recoverPullRequests();
-      await this.reconcilePullRequests();
+      await this.reconcileLifecycle();
       try {
         await this.options.validateDispatch();
       } catch (error) {
@@ -136,6 +137,16 @@ export class Orchestrator {
     } finally {
       this.ticking = false;
       if (!this.stopped) this.scheduleTick(this.state.poll_interval_ms);
+    }
+  }
+
+  async reconcileOnce(): Promise<void> {
+    if (this.ticking || this.stopped) return;
+    this.ticking = true;
+    try {
+      await this.reconcileLifecycle();
+    } finally {
+      this.ticking = false;
     }
   }
 
@@ -248,6 +259,13 @@ export class Orchestrator {
     } catch (error) {
       this.options.logger.warn("startup terminal workspace cleanup failed", { error: errorMessage(error) });
     }
+  }
+
+  private async reconcileLifecycle(): Promise<void> {
+    this.notifyConfigReload(this.options.getConfig());
+    await this.reconcileRunningIssues();
+    await this.recoverPullRequests();
+    await this.reconcilePullRequests();
   }
 
   private async restoreDurableState(): Promise<void> {

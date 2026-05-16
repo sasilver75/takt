@@ -11,6 +11,8 @@ The positional argument selects the workflow file. If omitted, Symphony uses `./
 
 `--port` enables the optional HTTP status surface and overrides `server.port` from workflow front matter. The server binds loopback by default.
 
+`--reconcile-once` restores durable state, runs tracker/GitHub lifecycle reconciliation, applies PR review/completion state transitions, and exits without fetching candidate issues or launching workers. Use it after downtime or manual PR merges when you want Symphony to catch up Linear/GitHub state without starting new implementation work.
+
 `examples/WORKFLOW.md` targets the real Linear project `Gallatin Demo` in the `Samcorp` team. Linear's generated project slug is `5f14e4e68dc4`; the team handoff state is `Needs Human`.
 
 ## Workflow Reload

@@ -18,6 +18,7 @@ export type SymphonyServiceOptions = {
   port?: number | null;
   logger?: Logger;
   env?: Record<string, string | undefined>;
+  runMode?: "daemon" | "reconcile_once";
 };
 
 export class SymphonyService {
@@ -63,11 +64,13 @@ export class SymphonyService {
     });
     runtime.onReload((config) => orchestrator.notifyConfigReload(config));
     this.orchestrator = orchestrator;
-    await orchestrator.start();
+    const reconcileOnce = this.options.runMode === "reconcile_once";
+    await orchestrator.start({ schedule: !reconcileOnce });
+    if (reconcileOnce) await orchestrator.reconcileOnce();
 
     const serverPort = runtime.getConfig().server.port;
     let http: { host: string; port: number } | undefined;
-    if (serverPort !== null) {
+    if (!reconcileOnce && serverPort !== null) {
       this.httpServer = createHttpStatusServer({
         host: runtime.getConfig().server.host,
         port: serverPort,
