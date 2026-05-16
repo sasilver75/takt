@@ -9,7 +9,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - Typed configuration: `src/config/config.ts`
   - Applies defaults, resolves `$VAR` only where explicitly configured, expands workspace paths, and validates dispatch preflight.
 - Tracker integration: `src/tracker/linear.ts`
-  - Implements Linear candidate fetch, terminal-state fetch, state refresh, normalization, pagination, and the `linear_graphql` extension backend.
+  - Implements Linear candidate fetch, terminal-state fetch, state refresh, state transitions, comments, normalization, pagination, and the `linear_graphql` extension backend.
 - PR publishing: `src/github/publisher.ts`
   - Pushes committed worker branches and creates or updates GitHub pull requests with orchestrator-held credentials after a worker writes the configured PR-ready manifest.
 - PR lifecycle tracking: `src/github/tracker.ts`

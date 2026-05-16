@@ -182,6 +182,12 @@ describe("linear tracker", () => {
     const client = new LinearTrackerClient(config, fetchImpl as typeof fetch);
     await expect(client.transitionIssue(normalizeIssue(rawIssue()), "Needs Human")).rejects.toMatchObject({ code: "linear_state_transition_failed" });
   });
+
+  test("rejects comment creation when Linear does not report success", async () => {
+    const fetchImpl = async () => new Response(JSON.stringify({ data: { commentCreate: { success: false } } }), { status: 200 });
+    const client = new LinearTrackerClient(config, fetchImpl as typeof fetch);
+    await expect(client.commentOnIssue(normalizeIssue(rawIssue()), "Published PR")).rejects.toMatchObject({ code: "linear_comment_failed" });
+  });
 });
 
 function rawIssue(overrides: Record<string, unknown> = {}): Record<string, unknown> {

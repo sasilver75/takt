@@ -166,7 +166,10 @@ export class LinearTrackerClient implements TrackerClient {
         }
       }
     `;
-    await this.graphql(mutation, { issueId: issue.id, body: bodyText });
+    const body = await this.graphql(mutation, { issueId: issue.id, body: bodyText });
+    if (valueAtPath(body, ["data", "commentCreate", "success"]) !== true) {
+      throw new SymphonyError("linear_comment_failed", "Linear commentCreate did not report success");
+    }
   }
 
   private async workflowStateIdForIssue(issueId: string, stateName: string): Promise<string> {

@@ -12,6 +12,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Dynamic workflow watch/reload with last-good config | `src/workflow/runtime.ts`, `src/orchestrator/orchestrator.ts` | `src/workflow/workflow_config.test.ts` |
 | Single-authority polling orchestrator state | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
 | Linear candidate fetch, terminal fetch, state refresh | `src/tracker/linear.ts` | `src/tracker/linear.test.ts` |
+| Orchestrator-owned Linear state transitions and comments | `src/tracker/linear.ts`, `src/orchestrator/orchestrator.ts` | `src/tracker/linear.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Sanitized, contained per-issue workspaces | `src/workspace/manager.ts` | `src/workspace/manager.test.ts` |
 | Workspace lifecycle hooks and timeouts | `src/workspace/manager.ts`, `src/runtime/workerRuntime.ts` | `src/workspace/manager.test.ts`, `src/runtime/workerRuntime.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Codex app-server JSON-line client, same-thread continuation turns, timeout classification, and unsupported tool failures | `src/agent/codexClient.ts`, `src/agent/runner.ts` | `src/agent/runner.test.ts`, `src/harness/toyWebappFactory.test.ts` |

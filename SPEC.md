@@ -36,8 +36,10 @@ stricter approvals or sandboxing.
 Important boundary:
 
 - Symphony is a scheduler/runner and tracker reader.
-- Ticket writes (state transitions, comments, PR links) are typically performed by the coding agent
-  using tools available in the workflow/runtime environment.
+- Core conformance requires tracker reads only; implementations MAY add orchestrator-owned tracker
+  writes for claim/review/completion transitions, PR links, and follow-up briefs.
+- Ticket writes may also be performed by the coding agent using tools available in the
+  workflow/runtime environment when a workflow chooses that policy.
 - A successful run can end at a workflow-defined handoff state (for example `Human Review`), not
   necessarily `Done`.
 
@@ -1190,6 +1192,9 @@ RECOMMENDED error categories:
 - `linear_graphql_errors`
 - `linear_unknown_payload`
 - `linear_missing_end_cursor` (pagination integrity error)
+- `linear_state_not_found` (tracker-write extension)
+- `linear_state_transition_failed` (tracker-write extension)
+- `linear_comment_failed` (tracker-write extension)
 
 Orchestrator behavior on tracker errors:
 
@@ -1197,17 +1202,34 @@ Orchestrator behavior on tracker errors:
 - Running-state refresh failure: log and keep active workers running.
 - Startup terminal cleanup failure: log warning and continue startup.
 
-### 11.5 Tracker Writes (Important Boundary)
+### 11.5 Tracker Writes (OPTIONAL Orchestrator Extension)
 
-Symphony does not require first-class tracker write APIs in the orchestrator.
+Core conformance does not require first-class tracker write APIs in the orchestrator.
 
-- Ticket mutations (state transitions, comments, PR metadata) are typically handled by the coding
-  agent using tools defined by the workflow prompt.
-- The service remains a scheduler/runner and tracker reader.
-- Workflow-specific success often means "reached the next handoff state" (for example
-  `Human Review`) rather than tracker terminal state `Done`.
-- If the `linear_graphql` client-side tool extension is implemented, it is still part of the agent
-  toolchain rather than orchestrator business logic.
+If implemented, an orchestrator-owned tracker-write extension SHOULD keep tracker mutations narrow
+and auditable:
+
+- `transition_issue(issue, state_name)`
+  - Resolve the target workflow state by name within the issue's team/workflow.
+  - Update the issue state.
+  - Validate that the returned issue is in the requested state.
+  - Surface a structured failure if the state cannot be found or the returned state differs.
+- `comment_on_issue(issue, body)`
+  - Create a tracker comment for the issue.
+  - Validate that the tracker reports comment creation success.
+  - Surface a structured failure if the mutation is rejected.
+- The orchestrator MAY use these writes for workflow-level lifecycle operations such as claim
+  transitions, PR-link comments, review-state transitions, completion-state transitions, and PR
+  follow-up briefs.
+- Tracker-write failures MUST be operator-visible and MUST NOT expose tracker credentials in logs,
+  durable state, PR comments, or worker workspaces.
+- Coding agents MAY still perform workflow-specific tracker writes through approved tools when the
+  workflow prompt assigns that responsibility.
+- If the `linear_graphql` client-side tool extension is implemented, it remains an agent toolchain
+  extension; it is not a substitute for validating orchestrator-owned writes.
+
+Workflow-specific success often means "reached the next handoff state" (for example `Human Review`)
+rather than tracker terminal state `Done`.
 
 ## 12. Prompt Construction and Context Assembly
 
@@ -1989,6 +2011,11 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - Issue state refresh by ID returns minimal normalized issues
 - Issue state refresh query uses GraphQL ID typing (`[ID!]`) as specified in Section 11.2
 - Error mapping for request errors, non-200, GraphQL errors, malformed payloads
+- If orchestrator-owned tracker writes are implemented:
+  - state transition resolves workflow state by name and validates returned state
+  - missing workflow state returns structured failure
+  - comment creation validates tracker-reported mutation success
+  - failed comment creation returns structured failure
 
 ### 17.4 Orchestrator Dispatch, Reconciliation, and Retry
 
@@ -2106,6 +2133,9 @@ Use the same validation profiles as Section 17:
   exposes the baseline endpoints/error semantics in Section 13.7 if shipped.
 - `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth.
+- First-class tracker-write extension lets the orchestrator move issues through claim, review, and
+  completion states; publish PR links and follow-up briefs as tracker comments; and validate write
+  mutation success without exposing tracker credentials to workers.
 - Durable state extension persists retry queue, issue history, PR metadata, and session summaries
   across process restarts. Live worker processes are not required to survive restart.
 - GitHub PR lifecycle extension owns orchestrator-side PR publishing/reconciliation, including
@@ -2118,8 +2148,6 @@ Use the same validation profiles as Section 17:
   review, non-draft PR state, and clean mergeability unless explicitly relaxed by workflow config.
 - Observability settings MAY be configurable in workflow front matter without prescribing UI
   implementation details.
-- TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
-  of only via agent tools.
 - TODO: Add pluggable issue tracker adapters beyond Linear.
 
 ### 18.3 Operational Validation Before Production (RECOMMENDED)
