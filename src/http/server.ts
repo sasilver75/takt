@@ -85,6 +85,7 @@ function renderDashboard(snapshot: unknown): string {
     codex_totals?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; seconds_running?: number };
     running?: Array<{ issue_identifier: string; state: string; last_event: string | null; turn_count: number }>;
     retrying?: Array<{ issue_identifier: string; attempt: number; due_at: string; error: string | null }>;
+    recent_events?: Array<{ at: string; event: string; issue_identifier?: string; session_id?: string | null; message?: string | null }>;
     pull_requests?: Array<{
       issue_identifier: string;
       pull_request: { number: number; url: string };
@@ -92,16 +93,24 @@ function renderDashboard(snapshot: unknown): string {
     }>;
   };
   const runningRows = (state.running ?? [])
-    .map((row) => `<tr><td>${escapeHtml(row.issue_identifier)}</td><td>${escapeHtml(row.state)}</td><td>${row.turn_count}</td><td>${escapeHtml(row.last_event ?? "")}</td></tr>`)
+    .map((row) => `<tr><td>${issueDrilldownLink(row.issue_identifier)}</td><td>${escapeHtml(row.state)}</td><td>${row.turn_count}</td><td>${escapeHtml(row.last_event ?? "")}</td></tr>`)
     .join("");
   const retryRows = (state.retrying ?? [])
-    .map((row) => `<tr><td>${escapeHtml(row.issue_identifier)}</td><td>${row.attempt}</td><td>${escapeHtml(row.due_at)}</td><td>${escapeHtml(row.error ?? "")}</td></tr>`)
+    .map((row) => `<tr><td>${issueDrilldownLink(row.issue_identifier)}</td><td>${row.attempt}</td><td>${escapeHtml(row.due_at)}</td><td>${escapeHtml(row.error ?? "")}</td></tr>`)
     .join("");
   const prRows = (state.pull_requests ?? [])
     .map((row) => {
       const status = row.status;
-      return `<tr><td>${escapeHtml(row.issue_identifier)}</td><td><a href="${escapeHtml(row.pull_request.url)}">#${row.pull_request.number}</a></td><td>${escapeHtml(status?.state ?? "")}</td><td>${escapeHtml(status?.checks_status ?? "")}</td><td>${escapeHtml(status?.review_status ?? "")}</td><td>${escapeHtml(status?.summary ?? "")}</td></tr>`;
+      return `<tr><td>${issueDrilldownLink(row.issue_identifier)}</td><td><a href="${escapeHtml(row.pull_request.url)}">#${row.pull_request.number}</a></td><td>${escapeHtml(status?.state ?? "")}</td><td>${escapeHtml(status?.checks_status ?? "")}</td><td>${escapeHtml(status?.review_status ?? "")}</td><td>${escapeHtml(status?.summary ?? "")}</td></tr>`;
     })
+    .join("");
+  const eventRows = (state.recent_events ?? [])
+    .slice(-50)
+    .reverse()
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.at)}</td><td>${escapeHtml(row.event)}</td><td>${row.issue_identifier ? issueDrilldownLink(row.issue_identifier) : ""}</td><td>${escapeHtml(row.session_id ?? "")}</td><td>${escapeHtml(row.message ?? "")}</td></tr>`
+    )
     .join("");
   return `<!doctype html>
 <html>
@@ -135,9 +144,14 @@ function renderDashboard(snapshot: unknown): string {
     <section><h2>Running</h2><table><thead><tr><th>Issue</th><th>State</th><th>Turns</th><th>Last Event</th></tr></thead><tbody>${runningRows}</tbody></table></section>
     <section><h2>Retry Queue</h2><table><thead><tr><th>Issue</th><th>Attempt</th><th>Due</th><th>Error</th></tr></thead><tbody>${retryRows}</tbody></table></section>
     <section><h2>Pull Requests</h2><table><thead><tr><th>Issue</th><th>PR</th><th>State</th><th>Checks</th><th>Review</th><th>Summary</th></tr></thead><tbody>${prRows}</tbody></table></section>
+    <section><h2>Recent Events</h2><table><thead><tr><th>Time</th><th>Event</th><th>Issue</th><th>Session</th><th>Message</th></tr></thead><tbody>${eventRows}</tbody></table></section>
   </main>
 </body>
 </html>`;
+}
+
+function issueDrilldownLink(identifier: string): string {
+  return `<a href="/api/v1/${encodeURIComponent(identifier)}">${escapeHtml(identifier)}</a>`;
 }
 
 function escapeHtml(value: string): string {

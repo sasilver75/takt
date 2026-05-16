@@ -7,9 +7,17 @@ describe("HTTP status server", () => {
     const orchestrator = {
       snapshot: () => ({
         generated_at: "2026-01-01T00:00:00.000Z",
-        counts: { running: 0, retrying: 0 },
-        running: [],
+        counts: { running: 1, retrying: 0, completed: 0, pull_requests: 1 },
+        running: [{ issue_identifier: "ABC-1", state: "In Progress", turn_count: 2, last_event: "turn/started" }],
         retrying: [],
+        pull_requests: [
+          {
+            issue_identifier: "ABC-1",
+            pull_request: { number: 7, url: "https://github.test/acme/widgets/pull/7" },
+            status: { state: "open", checks_status: "success", review_status: "review_required", summary: "PR #7 is open." }
+          }
+        ],
+        recent_events: [{ at: "2026-01-01T00:00:01.000Z", event: "turn/started", issue_identifier: "ABC-1", session_id: "session-1", message: "Worker started" }],
         codex_totals: { input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0 },
         rate_limits: null
       }),
@@ -33,8 +41,12 @@ describe("HTTP status server", () => {
       throw error;
     }
     const base = `http://${address.host}:${address.port}`;
-    expect(await (await fetch(`${base}/`)).text()).toContain("Symphony Status");
-    expect((await (await fetch(`${base}/api/v1/state`)).json()).counts.running).toBe(0);
+    const dashboard = await (await fetch(`${base}/`)).text();
+    expect(dashboard).toContain("Symphony Status");
+    expect(dashboard).toContain("Recent Events");
+    expect(dashboard).toContain("/api/v1/ABC-1");
+    expect(dashboard).toContain("Worker started");
+    expect((await (await fetch(`${base}/api/v1/state`)).json()).counts.running).toBe(1);
     expect((await (await fetch(`${base}/api/v1/ABC-1`)).json()).status).toBe("known");
     expect((await fetch(`${base}/api/v1/missing`)).status).toBe(404);
     expect((await fetch(`${base}/api/v1/state`, { method: "POST" })).status).toBe(405);
