@@ -113,8 +113,15 @@ export class LinearTrackerClient implements TrackerClient {
       }
     `;
     const body = await this.graphql(mutation, { id: issue.id, stateId });
+    if (valueAtPath(body, ["data", "issueUpdate", "success"]) !== true) {
+      throw new SymphonyError("linear_state_transition_failed", `Linear issueUpdate did not report success for state: ${stateName}`);
+    }
     const updated = valueAtPath(body, ["data", "issueUpdate", "issue"]);
-    return normalizeIssue(updated);
+    const normalized = normalizeIssue(updated);
+    if (normalizeStateName(normalized.state) !== normalizeStateName(stateName)) {
+      throw new SymphonyError("linear_state_transition_failed", `Linear issueUpdate returned state ${normalized.state}, expected ${stateName}`);
+    }
+    return normalized;
   }
 
   async commentOnIssue(issue: Issue, bodyText: string): Promise<void> {
@@ -138,7 +145,7 @@ export class LinearTrackerClient implements TrackerClient {
     const teamId = nullableString(valueAtPath(issueBody, ["data", "issue", "team", "id"]));
     if (!teamId) throw new SymphonyError("linear_unknown_payload", "Linear issue team id was missing");
     const statesQuery = `
-      query SymphonyWorkflowState($teamId: String!, $name: String!) {
+      query SymphonyWorkflowState($teamId: ID!, $name: String!) {
         workflowStates(first: 50, filter: { team: { id: { eq: $teamId } }, name: { eq: $name } }) {
           nodes { id name }
         }
@@ -179,10 +186,17 @@ export class LinearTrackerClient implements TrackerClient {
     } finally {
       clearTimeout(timeout);
     }
-    if (!response.ok) throw new SymphonyError("linear_api_status", `Linear API returned HTTP ${response.status}`);
-    const body = await response.json().catch((error: unknown) => {
-      throw new SymphonyError("linear_unknown_payload", "Linear returned invalid JSON", error);
+    const rawBody = await response.text().catch((error: unknown) => {
+      throw new SymphonyError("linear_unknown_payload", "Linear response could not be read", error);
     });
+    let body: unknown = null;
+    try {
+      body = rawBody.length > 0 ? JSON.parse(rawBody) : null;
+    } catch (error) {
+      if (!response.ok) throw new SymphonyError("linear_api_status", `Linear API returned HTTP ${response.status}: invalid JSON response`, error);
+      throw new SymphonyError("linear_unknown_payload", "Linear returned invalid JSON", error);
+    }
+    if (!response.ok) throw new SymphonyError("linear_api_status", `Linear API returned HTTP ${response.status}: ${linearErrorSummary(body)}`);
     if (!options.allowGraphqlErrors && body && typeof body === "object" && "errors" in body) {
       throw new SymphonyError("linear_graphql_errors", "Linear returned GraphQL errors", body);
     }
@@ -290,6 +304,20 @@ function requiredString(root: Record<string, unknown>, key: string): string {
 
 function nullableString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function normalizeStateName(value: string): string {
+  return value.toLowerCase();
+}
+
+function linearErrorSummary(body: unknown): string {
+  if (!body || typeof body !== "object" || !("errors" in body)) return "no error details";
+  const errors = (body as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) return "no error details";
+  const messages = errors
+    .map((error) => (error && typeof error === "object" && "message" in error ? String((error as { message?: unknown }).message) : null))
+    .filter((message): message is string => Boolean(message));
+  return messages.length > 0 ? messages.slice(0, 3).join("; ") : "no error details";
 }
 
 function nullableIso(value: unknown): string | null {

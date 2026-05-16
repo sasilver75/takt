@@ -122,6 +122,7 @@ describe("linear tracker", () => {
         return new Response(JSON.stringify({ data: { issue: { id: "id-1", team: { id: "team-1" } } } }), { status: 200 });
       }
       if (request.query.includes("SymphonyWorkflowState")) {
+        expect(request.query).toContain("$teamId: ID!");
         return new Response(JSON.stringify({ data: { workflowStates: { nodes: [{ id: "state-1", name: "Needs Human" }] } } }), { status: 200 });
       }
       if (request.query.includes("SymphonyIssueTransition")) {
@@ -138,6 +139,21 @@ describe("linear tracker", () => {
       { id: "id-1", stateId: "state-1" },
       { issueId: "id-1", body: "Published PR" }
     ]);
+  });
+
+  test("rejects state transitions when Linear does not return the requested state", async () => {
+    const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { query: string };
+      if (request.query.includes("SymphonyIssueTeam")) {
+        return new Response(JSON.stringify({ data: { issue: { id: "id-1", team: { id: "team-1" } } } }), { status: 200 });
+      }
+      if (request.query.includes("SymphonyWorkflowState")) {
+        return new Response(JSON.stringify({ data: { workflowStates: { nodes: [{ id: "state-1", name: "Needs Human" }] } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: { issueUpdate: { success: true, issue: rawIssue({ state: { name: "In Progress" } }) } } }), { status: 200 });
+    };
+    const client = new LinearTrackerClient(config, fetchImpl as typeof fetch);
+    await expect(client.transitionIssue(normalizeIssue(rawIssue()), "Needs Human")).rejects.toMatchObject({ code: "linear_state_transition_failed" });
   });
 });
 

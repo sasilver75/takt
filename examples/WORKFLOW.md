@@ -43,7 +43,10 @@ hooks:
   before_run: |
     git fetch origin main
     git merge --ff-only origin/main
-    pnpm install --frozen-lockfile=false
+    git config user.name "Symphony Worker"
+    git config user.email "symphony-worker@example.invalid"
+    rm -rf .pnpm-store
+    pnpm install --frozen-lockfile=false --store-dir "$TMPDIR/pnpm-store"
 agent:
   max_concurrent_agents: 2
   max_turns: 20
@@ -52,6 +55,9 @@ agent:
     Needs Human: 1
 codex:
   command: codex app-server
+  thread_sandbox: danger-full-access
+  turn_sandbox_policy:
+    type: dangerFullAccess
   linear_graphql_mcp:
     enabled: true
     server_name: symphony_linear

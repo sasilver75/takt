@@ -253,6 +253,7 @@ export class Orchestrator {
 
   private shouldDispatch(issue: Issue): boolean {
     if (!issue.id || !issue.identifier || !issue.title || !issue.state) return false;
+    if (this.state.completed.has(issue.id)) return false;
     if (!isActiveState(issue.state, this.options.getConfig())) return false;
     if (isTerminalState(issue.state, this.options.getConfig())) return false;
     if (this.state.running.has(issue.id) || this.state.claimed.has(issue.id)) return false;
@@ -371,7 +372,6 @@ export class Orchestrator {
         this.state.completed.add(issueId);
         this.state.claimed.delete(issueId);
       } else {
-        this.state.completed.add(issueId);
         this.scheduleRetry(issueId, 1, entry.identifier, record.last_error, true);
       }
     } else {
@@ -469,6 +469,7 @@ export class Orchestrator {
     const issue = candidates.find((candidate) => candidate.id === issueId);
     if (!issue) {
       this.state.claimed.delete(issueId);
+      this.state.completed.add(issueId);
       return;
     }
     if (!this.shouldDispatchIgnoringClaim(issue)) {

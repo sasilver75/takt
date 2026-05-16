@@ -40,6 +40,7 @@ The current safety posture is:
 - GitHub credentials are resolved from workflow config/env indirection and used only by the orchestrator-owned PR publisher. Workers do not receive `GITHUB_TOKEN`; they commit changes and write the configured PR-ready manifest.
 - Agent-side Linear actions should use the Symphony-owned `linear_graphql` tool exposed by the `symphony_linear` MCP server. Symphony hosts that MCP server on a short-lived Streamable HTTP endpoint and registers only its runtime URL with Codex; no Linear API key or bridge token is written into the worker workspace. Docker workers use an MCP bearer-token env var rather than an argv or workspace-file secret.
 - Docker workers receive a runtime lease env including `SYMPHONY_RUN_ID`, `SYMPHONY_PORT_BASE`, `PORT`, `APP_PORT`, `VITE_PORT`, `DATABASE_PORT`, `REDIS_PORT`, `TMPDIR`, and `COMPOSE_PROJECT_NAME` to reduce port/service-name collisions.
+- The Docker workflow uses Docker as the primary execution boundary and sets Codex's inner thread/turn sandbox to danger-full-access to avoid nested bubblewrap namespace failures inside containers. Keep the Docker mount set minimal: issue workspace plus ephemeral Codex auth only.
 - The Docker image/build context excludes `keys.txt`, `.env*`, `node_modules`, `dist`, and `.git`.
 - `.symphony` is orchestrator-owned runtime wiring. Workers are instructed not to inspect it, print it, or commit it.
 

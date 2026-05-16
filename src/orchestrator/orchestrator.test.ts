@@ -38,7 +38,7 @@ describe("orchestrator", () => {
       logger: createLogger(() => undefined)
     });
     await orchestrator.tick();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "continuation retry");
     const snapshot = orchestrator.snapshot() as { counts: { retrying: number }; codex_totals: { total_tokens: number } };
     expect(snapshot.counts.retrying).toBe(1);
     expect(snapshot.codex_totals.total_tokens).toBe(7);
@@ -104,7 +104,7 @@ describe("orchestrator", () => {
     });
 
     await orchestrator.tick();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await waitFor(() => published.length === 1, "pull request publication");
 
     expect(published).toHaveLength(1);
     expect(published[0]).toMatchObject({
@@ -117,6 +117,9 @@ describe("orchestrator", () => {
       status: "completed",
       tracked: { github_pull_request: { url: "https://github.test/acme/widgets/pull/9" } }
     });
+    await tracker.transitionIssue(activeIssue, "In Progress");
+    await orchestrator.tick();
+    expect(published).toHaveLength(1);
     await orchestrator.stop();
   });
 });
@@ -190,6 +193,15 @@ function githubDisabled(): SymphonyConfig["github"] {
     pr_ready_file: "SYMPHONY_PR_READY.json",
     draft: false
   };
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>, label: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 function fakeCodexServerSource(): string {
