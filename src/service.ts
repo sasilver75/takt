@@ -1,4 +1,5 @@
 import type { HttpStatusServer } from "./http/server.js";
+import { GitHubPullRequestMerger } from "./github/merger.js";
 import { GitHubPullRequestPublisher } from "./github/publisher.js";
 import { GitHubPullRequestTracker } from "./github/tracker.js";
 import { createHttpStatusServer } from "./http/server.js";
@@ -41,6 +42,7 @@ export class SymphonyService {
     const tracker = new LinearTrackerClient(() => runtime.getConfig());
     const pullRequestPublisher = new GitHubPullRequestPublisher(() => runtime.getConfig(), this.logger);
     const pullRequestTracker = new GitHubPullRequestTracker(() => runtime.getConfig(), this.logger);
+    const pullRequestMerger = new GitHubPullRequestMerger(() => runtime.getConfig(), this.logger);
     const durableStore = new JsonDurableStateStore(() => runtime.getConfig(), this.logger);
     const workspaceManager = new WorkspaceManager(() => runtime.getConfig(), this.logger);
     const orchestrator = new Orchestrator({
@@ -52,6 +54,7 @@ export class SymphonyService {
       linearTool: tracker,
       pullRequestPublisher,
       pullRequestTracker,
+      pullRequestMerger,
       durableStore,
       logger: this.logger
     });

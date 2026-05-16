@@ -14,6 +14,7 @@ import type {
   RuntimeState,
   RunningEntry,
   PublishedPullRequest,
+  PullRequestMerger,
   PullRequestInspection,
   PullRequestPublisher,
   PullRequestTracker,
@@ -40,6 +41,7 @@ export type OrchestratorOptions = {
   linearBridgeFactory?: ((options: LinearGraphqlBridgeStartOptions) => Promise<LinearGraphqlBridgeHandle | null>) | null | undefined;
   pullRequestPublisher?: PullRequestPublisher | null | undefined;
   pullRequestTracker?: PullRequestTracker | null | undefined;
+  pullRequestMerger?: PullRequestMerger | null | undefined;
   durableStore?: DurableStateStore | null | undefined;
 };
 
@@ -405,11 +407,14 @@ export class Orchestrator {
       if (inspection.state === "merged" || inspection.state === "closed") {
         this.state.completed.add(record.issue_id);
         record.tracked.github_pr_terminal_state = inspection.state;
+        record.tracked.github_pr_terminal_checked_at = inspection.checked_at;
+        if (inspection.state === "merged") await this.ensureIssueCompletionState(record, null, "pull_request_reconcile", false);
         this.persistState();
         continue;
       }
       const feedback = pullRequestFollowupFeedback(inspection, readHandledPullRequestFollowupKeys(record));
       if (feedback.length > 0) await this.queuePullRequestFollowup(record, pullRequest, inspection, feedback);
+      else if (this.shouldMergePullRequest(inspection)) await this.tryMergePullRequest(record, pullRequest, inspection);
       else {
         await this.ensureIssueReviewState(record, null, "pull_request_reconcile", false);
         this.persistState();
@@ -509,6 +514,59 @@ export class Orchestrator {
       issue_identifier: record.issue_identifier,
       message: reason
     });
+  }
+
+  private shouldMergePullRequest(inspection: PullRequestInspection): boolean {
+    const merge = this.options.getConfig().github.merge;
+    if (!merge.enabled || !this.options.pullRequestMerger) return false;
+    if (inspection.state !== "open" || inspection.draft) return false;
+    if (merge.require_successful_checks && inspection.checks_status !== "success") return false;
+    if (merge.require_approval && inspection.review_status !== "approved") return false;
+    if (merge.require_clean_merge && normalizeMergeableState(inspection.mergeable_state) !== "clean") return false;
+    return true;
+  }
+
+  private async tryMergePullRequest(record: IssueDebugRecord, pullRequest: PublishedPullRequest, inspection: PullRequestInspection): Promise<void> {
+    if (!this.options.pullRequestMerger) return;
+    try {
+      const result = await this.options.pullRequestMerger.merge({ pullRequest, inspection });
+      record.tracked.github_pull_request_merge = result;
+      if (!result.merged) {
+        record.last_error = result.message ?? "GitHub reported that the PR was not merged";
+        this.recordEvent({
+          at: new Date().toISOString(),
+          event: "pull_request_merge_failed",
+          issue_id: record.issue_id,
+          issue_identifier: record.issue_identifier,
+          message: record.last_error
+        });
+        return;
+      }
+      record.last_error = null;
+      record.tracked.github_pr_terminal_state = "merged";
+      record.tracked.github_pr_merged_at = new Date().toISOString();
+      this.state.completed.add(record.issue_id);
+      await this.ensureIssueCompletionState(record, null, "pull_request_merge", false);
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_merged",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: pullRequest.url
+      });
+      this.persistState();
+    } catch (error) {
+      const message = errorMessage(error);
+      record.last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_merge_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message
+      });
+      this.persistState();
+    }
   }
 
   private reconcileStalls(): void {
@@ -716,17 +774,53 @@ export class Orchestrator {
   private async ensureIssueReviewState(record: IssueDebugRecord, knownIssue: Issue | null, source: string, throwOnFailure: boolean): Promise<void> {
     const reviewState = this.options.getConfig().tracker.review_state;
     if (!reviewState) return;
+    await this.ensureTrackedIssueState(record, knownIssue, reviewState, {
+      source,
+      throwOnFailure,
+      trackedPrefix: "tracker_review",
+      failedEvent: "issue_review_state_failed",
+      reconciledEvent: "issue_review_state_reconciled",
+      missingMessage: "Tracked issue could not be refreshed for review-state reconciliation"
+    });
+  }
+
+  private async ensureIssueCompletionState(record: IssueDebugRecord, knownIssue: Issue | null, source: string, throwOnFailure: boolean): Promise<void> {
+    const completionState = this.options.getConfig().github.merge.complete_state;
+    if (!completionState) return;
+    await this.ensureTrackedIssueState(record, knownIssue, completionState, {
+      source,
+      throwOnFailure,
+      trackedPrefix: "tracker_completion",
+      failedEvent: "issue_completion_state_failed",
+      reconciledEvent: "issue_completion_state_reconciled",
+      missingMessage: "Tracked issue could not be refreshed for completion-state reconciliation"
+    });
+  }
+
+  private async ensureTrackedIssueState(
+    record: IssueDebugRecord,
+    knownIssue: Issue | null,
+    targetState: string,
+    options: {
+      source: string;
+      throwOnFailure: boolean;
+      trackedPrefix: string;
+      failedEvent: string;
+      reconciledEvent: string;
+      missingMessage: string;
+    }
+  ): Promise<void> {
     if (!this.options.tracker.transitionIssue) {
       const message = "Tracker does not support issue state transitions";
       record.last_error = message;
       this.recordEvent({
         at: new Date().toISOString(),
-        event: "issue_review_state_failed",
+        event: options.failedEvent,
         issue_id: record.issue_id,
         issue_identifier: record.issue_identifier,
-        message: `${source}: ${message}`
+        message: `${options.source}: ${message}`
       });
-      if (throwOnFailure) throw new Error(message);
+      if (options.throwOnFailure) throw new Error(message);
       return;
     }
 
@@ -740,63 +834,63 @@ export class Orchestrator {
         record.last_error = message;
         this.recordEvent({
           at: new Date().toISOString(),
-          event: "issue_review_state_failed",
+          event: options.failedEvent,
           issue_id: record.issue_id,
           issue_identifier: record.issue_identifier,
-          message: `${source}: ${message}`
+          message: `${options.source}: ${message}`
         });
-        if (throwOnFailure) throw error;
+        if (options.throwOnFailure) throw error;
         return;
       }
     }
 
     if (!issue) {
-      const message = "Tracked issue could not be refreshed for review-state reconciliation";
+      const message = options.missingMessage;
       record.last_error = message;
       this.recordEvent({
         at: new Date().toISOString(),
-        event: "issue_review_state_failed",
+        event: options.failedEvent,
         issue_id: record.issue_id,
         issue_identifier: record.issue_identifier,
-        message: `${source}: ${message}`
+        message: `${options.source}: ${message}`
       });
-      if (throwOnFailure) throw new Error(message);
+      if (options.throwOnFailure) throw new Error(message);
       return;
     }
 
     const checkedAt = new Date().toISOString();
-    if (normalizeState(issue.state) === normalizeState(reviewState)) {
-      record.tracked.tracker_review_state = issue.state;
-      record.tracked.tracker_review_state_checked_at = checkedAt;
-      record.tracked.tracker_review_state_source = source;
+    if (normalizeState(issue.state) === normalizeState(targetState)) {
+      record.tracked[`${options.trackedPrefix}_state`] = issue.state;
+      record.tracked[`${options.trackedPrefix}_state_checked_at`] = checkedAt;
+      record.tracked[`${options.trackedPrefix}_state_source`] = options.source;
       record.last_error = null;
       return;
     }
 
     try {
-      const updated = await this.options.tracker.transitionIssue(issue, reviewState);
-      record.tracked.tracker_review_state = updated.state;
-      record.tracked.tracker_review_state_checked_at = checkedAt;
-      record.tracked.tracker_review_state_source = source;
+      const updated = await this.options.tracker.transitionIssue(issue, targetState);
+      record.tracked[`${options.trackedPrefix}_state`] = updated.state;
+      record.tracked[`${options.trackedPrefix}_state_checked_at`] = checkedAt;
+      record.tracked[`${options.trackedPrefix}_state_source`] = options.source;
       record.last_error = null;
       this.recordEvent({
         at: checkedAt,
-        event: "issue_review_state_reconciled",
+        event: options.reconciledEvent,
         issue_id: record.issue_id,
         issue_identifier: record.issue_identifier,
-        message: `${source}: ${issue.state} -> ${updated.state}`
+        message: `${options.source}: ${issue.state} -> ${updated.state}`
       });
     } catch (error) {
       const message = errorMessage(error);
       record.last_error = message;
       this.recordEvent({
         at: new Date().toISOString(),
-        event: "issue_review_state_failed",
+        event: options.failedEvent,
         issue_id: record.issue_id,
         issue_identifier: record.issue_identifier,
-        message: `${source}: ${message}`
+        message: `${options.source}: ${message}`
       });
-      if (throwOnFailure) throw error;
+      if (options.throwOnFailure) throw error;
     }
   }
 
@@ -1075,6 +1169,10 @@ function readHandledPullRequestFollowupKeys(record: IssueDebugRecord): Set<strin
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function normalizeMergeableState(state: string | null): string | null {
+  return state ? state.toLowerCase() : null;
 }
 
 function actionableChecks(inspection: PullRequestInspection): PullRequestInspection["checks"] {

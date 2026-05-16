@@ -41,7 +41,7 @@ describe("workflow loader and config", () => {
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(
       workflowPath,
-      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\n  claim_state: In Progress\n  review_state: Needs Human\ngithub:\n  enabled: true\n  owner: acme\n  repo: widgets\n  token: $GITHUB_TOKEN\nworkspace:\n  root: workspaces\nruntime:\n  kind: docker\n  docker:\n    image: symphony-codex-worker:test\n    codex_home: $CODEX_HOME_TEST\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\n---\nbody`
+      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\n  claim_state: In Progress\n  review_state: Needs Human\ngithub:\n  enabled: true\n  owner: acme\n  repo: widgets\n  token: $GITHUB_TOKEN\n  merge:\n    enabled: true\n    method: rebase\n    delete_branch: false\n    complete_state: Done\nworkspace:\n  root: workspaces\nruntime:\n  kind: docker\n  docker:\n    image: symphony-codex-worker:test\n    codex_home: $CODEX_HOME_TEST\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\n---\nbody`
     );
     const config = resolveConfig(await loadWorkflow(workflowPath), {
       LINEAR_TOKEN: "secret",
@@ -53,6 +53,15 @@ describe("workflow loader and config", () => {
     expect(config.tracker.claim_state).toBe("In Progress");
     expect(config.tracker.review_state).toBe("Needs Human");
     expect(config.github).toMatchObject({ enabled: true, owner: "acme", repo: "widgets", token: "github-secret" });
+    expect(config.github.merge).toMatchObject({
+      enabled: true,
+      method: "rebase",
+      require_approval: true,
+      require_successful_checks: true,
+      require_clean_merge: true,
+      delete_branch: false,
+      complete_state: "Done"
+    });
     expect(config.workspace.root).toBe(path.join(dir, "workspaces"));
     expect(config.agent.max_concurrent_agents_by_state).toEqual({ todo: 2 });
     expect(config.codex.command).toBe("codex app-server --flag");

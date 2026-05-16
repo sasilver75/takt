@@ -50,6 +50,7 @@ export type SymphonyConfig = {
     branch_prefix: string;
     pr_ready_file: string;
     draft: boolean;
+    merge: GitHubMergeConfig;
   };
   polling: {
     interval_ms: number;
@@ -88,6 +89,18 @@ export type SymphonyConfig = {
     port: number | null;
     host: string;
   };
+};
+
+export type GitHubMergeMethod = "merge" | "squash" | "rebase";
+
+export type GitHubMergeConfig = {
+  enabled: boolean;
+  method: GitHubMergeMethod;
+  require_approval: boolean;
+  require_successful_checks: boolean;
+  require_clean_merge: boolean;
+  delete_branch: boolean;
+  complete_state: string | null;
 };
 
 export type RuntimeConfig =
@@ -248,6 +261,18 @@ export type PullRequestInspection = {
 export type PullRequestTracker = {
   inspect(input: PublishedPullRequest): Promise<PullRequestInspection>;
   discoverOpen?(): Promise<DiscoveredPullRequest[]>;
+};
+
+export type PullRequestMergeResult = {
+  number: number;
+  url: string;
+  merged: boolean;
+  sha: string | null;
+  message: string | null;
+};
+
+export type PullRequestMerger = {
+  merge(input: { pullRequest: PublishedPullRequest; inspection: PullRequestInspection }): Promise<PullRequestMergeResult>;
 };
 
 export type RunningEntry = {

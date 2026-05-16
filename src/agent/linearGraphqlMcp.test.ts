@@ -113,7 +113,20 @@ function githubDisabled(): SymphonyConfig["github"] {
     base_branch: "main",
     branch_prefix: "symphony",
     pr_ready_file: "SYMPHONY_PR_READY.json",
-    draft: false
+    draft: false,
+    merge: githubMergeDisabled()
+  };
+}
+
+function githubMergeDisabled(): SymphonyConfig["github"]["merge"] {
+  return {
+    enabled: false,
+    method: "squash",
+    require_approval: true,
+    require_successful_checks: true,
+    require_clean_merge: true,
+    delete_branch: true,
+    complete_state: null
   };
 }
 

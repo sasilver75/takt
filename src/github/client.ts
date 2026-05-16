@@ -2,7 +2,7 @@ import type { SymphonyConfig } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 
 export type FetchLike = typeof fetch;
-export type GitHubMethod = "GET" | "POST" | "PATCH";
+export type GitHubMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export class GitHubApiClient {
   constructor(

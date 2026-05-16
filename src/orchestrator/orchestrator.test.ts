@@ -2,7 +2,16 @@ import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import type { DiscoveredPullRequest, DurableStateSnapshot, DurableStateStore, PullRequestInspection, PullRequestPublisher, PullRequestTracker, SymphonyConfig } from "../domain.js";
+import type {
+  DiscoveredPullRequest,
+  DurableStateSnapshot,
+  DurableStateStore,
+  PullRequestInspection,
+  PullRequestMerger,
+  PullRequestPublisher,
+  PullRequestTracker,
+  SymphonyConfig
+} from "../domain.js";
 import { createLogger } from "../observability/logger.js";
 import { FakeTracker, issue } from "../testing/fakes.js";
 import { LocalTracker } from "../testing/localTracker.js";
@@ -273,6 +282,155 @@ describe("orchestrator", () => {
     expect(tracker.getIssue("i-pr-reconcile")?.state).toBe("Needs Human");
     expect(orchestrator.issueSnapshot("SAM-9")).toMatchObject({
       tracked: { tracker_review_state: "Needs Human", tracker_review_state_source: "pull_request_reconcile" }
+    });
+    await orchestrator.stop();
+  });
+
+  test("merges approved passing PRs and moves the tracker issue to completion state", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-merge-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human",
+        terminal_states: ["Done"]
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token",
+        merge: { ...githubMergeDisabled(), enabled: true, complete_state: "Done" }
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-merge", identifier: "SAM-16", state: "Todo", title: "Merge approved PR" });
+    const tracker = new LocalTracker([activeIssue]);
+    const publisher: PullRequestPublisher = {
+      async publish() {
+        return { number: 16, url: "https://github.test/acme/widgets/pull/16", branch: "symphony/sam-16-merge-approved-pr", title: "SAM-16: Merge approved PR", created: true };
+      }
+    };
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        return approvedInspection();
+      }
+    };
+    const merged: unknown[] = [];
+    const pullRequestMerger: PullRequestMerger = {
+      async merge(input) {
+        merged.push(input);
+        return { number: input.pullRequest.number, url: input.pullRequest.url, merged: true, sha: "merge-sha", message: "merged" };
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestTracker,
+      pullRequestMerger,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => tracker.getIssue("i-pr-merge")?.state === "Needs Human", "initial review-state transition");
+    await orchestrator.tick();
+    await waitFor(() => merged.length === 1, "approved pull request merge");
+
+    expect(tracker.getIssue("i-pr-merge")?.state).toBe("Done");
+    expect(merged[0]).toMatchObject({
+      pullRequest: { number: 16 },
+      inspection: { checks_status: "success", review_status: "approved", mergeable_state: "clean" }
+    });
+    expect(orchestrator.issueSnapshot("SAM-16")).toMatchObject({
+      status: "completed",
+      last_error: null,
+      tracked: {
+        github_pr_terminal_state: "merged",
+        github_pull_request_merge: { merged: true, sha: "merge-sha" },
+        tracker_completion_state: "Done",
+        tracker_completion_state_source: "pull_request_merge"
+      }
+    });
+    await orchestrator.stop();
+  });
+
+  test("does not merge PRs that have not satisfied the configured policy", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-merge-wait-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token",
+        merge: { ...githubMergeDisabled(), enabled: true, complete_state: "Done" }
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-merge-wait", identifier: "SAM-17", state: "Todo", title: "Wait for merge policy" });
+    const tracker = new LocalTracker([activeIssue]);
+    const publisher: PullRequestPublisher = {
+      async publish() {
+        return { number: 17, url: "https://github.test/acme/widgets/pull/17", branch: "symphony/sam-17-wait-for-merge-policy", title: "SAM-17: Wait for merge policy", created: true };
+      }
+    };
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        return {
+          ...approvedInspection(),
+          number: 17,
+          url: "https://github.test/acme/widgets/pull/17",
+          branch: "symphony/sam-17-wait-for-merge-policy",
+          title: "SAM-17: Wait for merge policy",
+          checks_status: "pending",
+          summary: "PR #17 is open; checks=pending; review=approved at merge-head-sha."
+        };
+      }
+    };
+    const pullRequestMerger: PullRequestMerger = {
+      async merge() {
+        throw new Error("merge should not be attempted");
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestTracker,
+      pullRequestMerger,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => tracker.getIssue("i-pr-merge-wait")?.state === "Needs Human", "initial review-state transition");
+    await orchestrator.tick();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(tracker.getIssue("i-pr-merge-wait")?.state).toBe("Needs Human");
+    expect(orchestrator.issueSnapshot("SAM-17")).toMatchObject({
+      status: "completed",
+      tracked: { github_pull_request_status: { checks_status: "pending", review_status: "approved" } }
     });
     await orchestrator.stop();
   });
@@ -706,6 +864,35 @@ function commentOnlyInspection(): PullRequestInspection {
   };
 }
 
+function approvedInspection(): PullRequestInspection {
+  return {
+    number: 16,
+    url: "https://github.test/acme/widgets/pull/16",
+    branch: "symphony/sam-16-merge-approved-pr",
+    title: "SAM-16: Merge approved PR",
+    state: "open",
+    checks_status: "success",
+    review_status: "approved",
+    head_sha: "merge-head-sha",
+    mergeable_state: "clean",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: "PR #16 is open; checks=success; review=approved at merge-head-sha.",
+    checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/16" }],
+    reviews: [
+      {
+        reviewer: "reviewer",
+        state: "APPROVED",
+        submitted_at: "2026-05-16T06:45:00.000Z",
+        body: "Approved.",
+        url: "https://github.test/review/16",
+        commit_id: "merge-head-sha"
+      }
+    ],
+    review_comments: []
+  };
+}
+
 function healthyInspection(): PullRequestInspection {
   return {
     number: 11,
@@ -779,7 +966,20 @@ function githubDisabled(): SymphonyConfig["github"] {
     base_branch: "main",
     branch_prefix: "symphony",
     pr_ready_file: "SYMPHONY_PR_READY.json",
-    draft: false
+    draft: false,
+    merge: githubMergeDisabled()
+  };
+}
+
+function githubMergeDisabled(): SymphonyConfig["github"]["merge"] {
+  return {
+    enabled: false,
+    method: "squash",
+    require_approval: true,
+    require_successful_checks: true,
+    require_clean_merge: true,
+    delete_branch: true,
+    complete_state: null
   };
 }
 

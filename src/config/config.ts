@@ -16,6 +16,7 @@ export function resolveConfig(
   const root = workflow.config;
   const tracker = objectAt(root, "tracker");
   const github = objectAt(root, "github");
+  const githubMerge = objectAt(github, "merge");
   const polling = objectAt(root, "polling");
   const workspace = objectAt(root, "workspace");
   const runtime = objectAt(root, "runtime");
@@ -51,7 +52,16 @@ export function resolveConfig(
       base_branch: stringAt(github, "base_branch") ?? "main",
       branch_prefix: stringAt(github, "branch_prefix") ?? "symphony",
       pr_ready_file: stringAt(github, "pr_ready_file") ?? "SYMPHONY_PR_READY.json",
-      draft: booleanAt(github, "draft", false)
+      draft: booleanAt(github, "draft", false),
+      merge: {
+        enabled: booleanAt(githubMerge, "enabled", false),
+        method: mergeMethodAt(githubMerge, "method", "squash"),
+        require_approval: booleanAt(githubMerge, "require_approval", true),
+        require_successful_checks: booleanAt(githubMerge, "require_successful_checks", true),
+        require_clean_merge: booleanAt(githubMerge, "require_clean_merge", true),
+        delete_branch: booleanAt(githubMerge, "delete_branch", true),
+        complete_state: emptyToNull(stringAt(githubMerge, "complete_state"))
+      }
     },
     polling: {
       interval_ms: positiveIntegerAt(polling, "interval_ms", 30000)
@@ -154,6 +164,13 @@ function stringAt(root: Record<string, unknown>, key: string): string | null {
 function booleanAt(root: Record<string, unknown>, key: string, fallback: boolean): boolean {
   const value = root[key];
   return typeof value === "boolean" ? value : fallback;
+}
+
+function mergeMethodAt(root: Record<string, unknown>, key: string, fallback: "merge" | "squash" | "rebase"): "merge" | "squash" | "rebase" {
+  const value = stringAt(root, key);
+  if (!value) return fallback;
+  if (value === "merge" || value === "squash" || value === "rebase") return value;
+  throw new SymphonyError("invalid_config_value", `${key} must be merge, squash, or rebase`);
 }
 
 function mcpServerNameAt(root: Record<string, unknown>, key: string, fallback: string): string {
