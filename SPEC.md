@@ -1510,6 +1510,10 @@ Minimum endpoints:
     }
     ```
 
+Additional evidence-artifact endpoints MAY be provided. If they serve local worker files, they MUST
+restrict access to workspace-contained paths declared by the issue evidence manifest and SHOULD add
+browser hardening headers when rendering inline content.
+
 API design notes:
 
 - The JSON shapes above are the RECOMMENDED baseline for interoperability and debugging ergonomics.

@@ -1,9 +1,15 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { createLogger } from "../observability/logger.js";
 import { createHttpStatusServer } from "./server.js";
 
 describe("HTTP status server", () => {
   test("serves dashboard, state, issue details, refresh, and method errors", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-http-artifacts-"));
+    await mkdir(path.join(workspace, "artifacts", "ABC-1"), { recursive: true });
+    await writeFile(path.join(workspace, "artifacts", "ABC-1", "home.png"), "fake image", "utf8");
     const orchestrator = {
       snapshot: () => ({
         generated_at: "2026-01-01T00:00:00.000Z",
@@ -32,7 +38,7 @@ describe("HTTP status server", () => {
               issue_identifier: "ABC-1",
               issue_id: "issue-1",
               status: "known",
-              workspace: { path: "/tmp/symphony/ABC-1" },
+              workspace: { path: workspace },
               attempts: {
                 restart_count: 1,
                 current_retry_attempt: null,
@@ -43,7 +49,7 @@ describe("HTTP status server", () => {
                     started_at: "2026-01-01T00:00:00.000Z",
                     finished_at: "2026-01-01T00:00:12.500Z",
                     runtime_seconds: 12.5,
-                    workspace_path: "/tmp/symphony/ABC-1",
+                    workspace_path: workspace,
                     session_id: "session-1",
                     turn_count: 2,
                     error: null,
@@ -105,6 +111,7 @@ describe("HTTP status server", () => {
     expect(issuePage).toContain("Issue ABC-1");
     expect(issuePage).toContain("/api/v1/ABC-1");
     expect(issuePage).toContain("artifacts/ABC-1/home.png");
+    expect(issuePage).toContain("/artifacts/ABC-1/artifacts/ABC-1/home.png");
     expect(issuePage).toContain("Artifact path is not tracked by git at publish time");
     expect(issuePage).toContain("Verified in browser.");
     expect(issuePage).toContain("Run Attempts");
@@ -113,6 +120,23 @@ describe("HTTP status server", () => {
     expect(issuePage).toContain("Worker started");
     expect((await (await fetch(`${base}/api/v1/state`)).json()).counts.running).toBe(1);
     expect((await (await fetch(`${base}/api/v1/ABC-1`)).json()).status).toBe("known");
+    const artifacts = await (await fetch(`${base}/api/v1/ABC-1/artifacts`)).json();
+    expect(artifacts).toMatchObject({
+      issue_identifier: "ABC-1",
+      artifacts: [
+        {
+          normalized_path: "artifacts/ABC-1/home.png",
+          local_url: "/artifacts/ABC-1/artifacts/ABC-1/home.png"
+        }
+      ],
+      files: [{ path: "artifacts/ABC-1/home.png", url: "/artifacts/ABC-1/artifacts/ABC-1/home.png" }]
+    });
+    const artifactResponse = await fetch(`${base}/artifacts/ABC-1/artifacts/ABC-1/home.png`);
+    expect(artifactResponse.status).toBe(200);
+    expect(artifactResponse.headers.get("content-type")).toBe("image/png");
+    expect(artifactResponse.headers.get("content-security-policy")).toContain("sandbox");
+    expect(await artifactResponse.text()).toBe("fake image");
+    expect((await fetch(`${base}/artifacts/ABC-1/%2E%2E/keys.txt`)).status).toBe(404);
     expect((await fetch(`${base}/issues/missing`)).status).toBe(404);
     expect((await fetch(`${base}/api/v1/missing`)).status).toBe(404);
     expect((await fetch(`${base}/api/v1/state`, { method: "POST" })).status).toBe(405);

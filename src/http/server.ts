@@ -1,5 +1,10 @@
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import path from "node:path";
+import type { EvidenceManifest } from "../domain.js";
+import { isDurableEvidenceArtifactPath, localEvidenceArtifactFiles, normalizeEvidenceArtifactPath } from "../github/evidenceArtifacts.js";
 import type { Orchestrator } from "../orchestrator/orchestrator.js";
 import type { Logger } from "../observability/logger.js";
 
@@ -58,6 +63,23 @@ async function route(request: IncomingMessage, response: ServerResponse, orchest
       requested_at: new Date().toISOString(),
       operations: ["poll", "reconcile"]
     });
+  }
+  const artifactListMatch = /^\/api\/v1\/([^/]+)\/artifacts$/.exec(url.pathname);
+  if (artifactListMatch) {
+    if (request.method !== "GET") return methodNotAllowed(response);
+    const identifier = decodeURIComponent(artifactListMatch[1] ?? "");
+    const snapshot = orchestrator.issueSnapshot(identifier);
+    if (!snapshot) return writeJson(response, 404, { error: { code: "issue_not_found", message: `Issue ${identifier} is not tracked` } });
+    return writeJson(response, 200, await artifactListSnapshot(snapshot));
+  }
+  const artifactFileMatch = /^\/artifacts\/([^/]+)\/(.+)$/.exec(url.pathname);
+  if (artifactFileMatch) {
+    if (request.method !== "GET") return methodNotAllowed(response);
+    const identifier = decodeURIComponent(artifactFileMatch[1] ?? "");
+    const requestedPath = decodeURIComponent(artifactFileMatch[2] ?? "");
+    const snapshot = orchestrator.issueSnapshot(identifier);
+    if (!snapshot) return writeJson(response, 404, { error: { code: "issue_not_found", message: `Issue ${identifier} is not tracked` } });
+    return serveEvidenceArtifact(response, snapshot, requestedPath);
   }
   const issuePageMatch = /^\/issues\/([^/]+)$/.exec(url.pathname);
   if (issuePageMatch) {
@@ -221,7 +243,7 @@ function renderIssuePage(snapshot: unknown): string {
     <section><h2>Issue</h2>${renderIssueDefinitionList(issue)}</section>
     <section><h2>Run Attempts</h2>${renderRunAttempts(issue)}</section>
     <section><h2>Pull Request</h2>${renderPullRequestDetails(pullRequest, pullRequestStatus, tracked)}</section>
-    <section><h2>Evidence</h2>${renderIssueEvidenceDetails(evidence, tracked)}</section>
+    <section><h2>Evidence</h2>${renderIssueEvidenceDetails(issue, evidence, tracked)}</section>
     <section><h2>Recent Events</h2><table><thead><tr><th>Time</th><th>Event</th><th>Session</th><th>Message</th></tr></thead><tbody>${eventRows}</tbody></table></section>
   </main>
 </body>
@@ -297,7 +319,7 @@ function renderPullRequestDetails(pullRequest: Record<string, unknown> | null, s
   </dl>`;
 }
 
-function renderIssueEvidenceDetails(evidence: Record<string, unknown> | null, tracked: Record<string, unknown>): string {
+function renderIssueEvidenceDetails(issue: IssuePageSnapshot, evidence: Record<string, unknown> | null, tracked: Record<string, unknown>): string {
   const commentUrl = readString(tracked.github_evidence_comment_url);
   const lastError = readString(tracked.github_evidence_last_error);
   const warnings = readStringArray(tracked.github_evidence_warnings);
@@ -311,7 +333,7 @@ function renderIssueEvidenceDetails(evidence: Record<string, unknown> | null, tr
     <dt>Summary</dt><dd>${escapeHtml(readString(evidence?.summary) ?? "")}</dd>
     <dt>Verification</dt><dd>${renderStringList(verification)}</dd>
     <dt>App URLs</dt><dd>${renderLinkedList(appUrls)}</dd>
-    <dt>Artifacts</dt><dd>${renderArtifactList(artifacts)}</dd>
+    <dt>Artifacts</dt><dd>${renderArtifactList(issue, artifacts)}</dd>
     <dt>Warnings</dt><dd>${renderWarningList(warnings)}</dd>
     <dt>Notes</dt><dd>${escapeHtml(readString(evidence?.notes) ?? "")}</dd>
     <dt>Error</dt><dd>${escapeHtml(lastError ?? "")}</dd>
@@ -328,18 +350,32 @@ function renderLinkedList(values: string[]): string {
   return `<ul>${values.map((value) => `<li><a href="${escapeHtml(value)}">${escapeHtml(value)}</a></li>`).join("")}</ul>`;
 }
 
-function renderArtifactList(artifacts: Record<string, unknown>[]): string {
+function renderArtifactList(issue: IssuePageSnapshot, artifacts: Record<string, unknown>[]): string {
   if (artifacts.length === 0) return "";
   return `<ul>${artifacts
     .map((artifact) => {
-      const path = readString(artifact.path);
+      const artifactPath = readString(artifact.path);
       const url = readString(artifact.url);
-      const target = url ? `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>` : path ? `<code>${escapeHtml(path)}</code>` : "";
+      const localLink = artifactPath ? localArtifactLink(issue, artifactPath) : null;
+      const target = url
+        ? `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>`
+        : artifactPath
+          ? `${localLink ? `<a href="${escapeHtml(localLink)}"><code>${escapeHtml(artifactPath)}</code></a>` : `<code>${escapeHtml(artifactPath)}</code>`}`
+          : "";
       const label = readString(artifact.label) ?? readString(artifact.kind) ?? "artifact";
       const description = readString(artifact.description);
       return `<li>${escapeHtml(label)} ${target}${description ? ` - ${escapeHtml(description)}` : ""}</li>`;
     })
     .join("")}</ul>`;
+}
+
+function localArtifactLink(issue: IssuePageSnapshot, artifactPath: string): string | null {
+  const identifier = issue.issue_identifier;
+  const workspacePath = issue.workspace?.path ?? undefined;
+  if (!identifier) return null;
+  const normalized = normalizeEvidenceArtifactPath(artifactPath, workspacePath);
+  if (!normalized || !isDurableEvidenceArtifactPath(normalized)) return null;
+  return `/artifacts/${encodeURIComponent(identifier)}/${encodePathSegments(normalized)}`;
 }
 
 function renderWarningList(warnings: string[]): string {
@@ -357,6 +393,132 @@ function readObjectArray(value: unknown): Record<string, unknown>[] {
 
 function readStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0) : [];
+}
+
+async function artifactListSnapshot(snapshot: unknown): Promise<unknown> {
+  const issue = snapshot as IssuePageSnapshot;
+  const evidence = readEvidenceManifestFromIssue(issue);
+  const workspacePath = issue.workspace?.path ?? null;
+  const files = evidence && workspacePath ? await localEvidenceArtifactFiles(evidence, workspacePath) : [];
+  const localFiles = files.map((file) => ({
+    path: file.repositoryPath,
+    url: `/artifacts/${encodeURIComponent(issue.issue_identifier ?? "")}/${encodePathSegments(file.repositoryPath)}`
+  }));
+  return {
+    issue_identifier: issue.issue_identifier ?? null,
+    workspace_path: workspacePath,
+    artifacts: (evidence?.artifacts ?? []).map((artifact) => {
+      const normalizedPath = normalizeEvidenceArtifactPath(artifact.path, workspacePath ?? undefined);
+      const matchingFiles = normalizedPath ? localFiles.filter((file) => file.path === normalizedPath || file.path.startsWith(`${normalizedPath}/`)) : [];
+      return {
+        kind: artifact.kind ?? null,
+        label: artifact.label ?? null,
+        description: artifact.description ?? null,
+        path: artifact.path ?? null,
+        normalized_path: normalizedPath,
+        url: artifact.url ?? null,
+        local_url: matchingFiles.find((file) => file.path === normalizedPath)?.url ?? null,
+        local_files: matchingFiles
+      };
+    }),
+    files: localFiles
+  };
+}
+
+async function serveEvidenceArtifact(response: ServerResponse, snapshot: unknown, requestedPath: string): Promise<void> {
+  const issue = snapshot as IssuePageSnapshot;
+  const workspacePath = issue.workspace?.path;
+  const evidence = readEvidenceManifestFromIssue(issue);
+  const normalizedPath = normalizeEvidenceArtifactPath(requestedPath, workspacePath ?? undefined);
+  if (!workspacePath || !evidence || !normalizedPath || !isDurableEvidenceArtifactPath(normalizedPath)) {
+    return writeJson(response, 404, { error: { code: "artifact_not_found", message: "Evidence artifact was not found" } });
+  }
+  const files = await localEvidenceArtifactFiles(evidence, workspacePath);
+  const file = files.find((entry) => entry.repositoryPath === normalizedPath);
+  if (!file) return writeJson(response, 404, { error: { code: "artifact_not_found", message: "Evidence artifact was not found" } });
+  let info;
+  try {
+    info = await stat(file.sourcePath);
+  } catch {
+    return writeJson(response, 404, { error: { code: "artifact_not_found", message: "Evidence artifact was not found" } });
+  }
+  if (!info.isFile()) return writeJson(response, 404, { error: { code: "artifact_not_found", message: "Evidence artifact was not found" } });
+  response.writeHead(200, {
+    "content-type": contentTypeForPath(file.repositoryPath),
+    "content-length": String(info.size),
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "sandbox; default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; media-src 'self' data: blob:",
+    "content-disposition": `inline; filename="${escapeHeaderQuotedString(path.basename(file.repositoryPath))}"`
+  });
+  await new Promise<void>((resolve) => {
+    const stream = createReadStream(file.sourcePath);
+    stream.on("error", () => {
+      response.destroy();
+      resolve();
+    });
+    response.on("finish", resolve);
+    response.on("close", resolve);
+    stream.pipe(response);
+  });
+}
+
+function readEvidenceManifestFromIssue(issue: IssuePageSnapshot): EvidenceManifest | null {
+  const evidence = readObject(issue.tracked?.github_evidence_manifest);
+  if (!evidence) return null;
+  return {
+    ...(typeof evidence.summary === "string" ? { summary: evidence.summary } : {}),
+    ...(Array.isArray(evidence.verification) ? { verification: evidence.verification.filter((entry): entry is string => typeof entry === "string") } : {}),
+    ...(Array.isArray(evidence.app_urls) ? { app_urls: evidence.app_urls.filter((entry): entry is string => typeof entry === "string") } : {}),
+    ...(Array.isArray(evidence.artifacts) ? { artifacts: evidence.artifacts.map(readEvidenceArtifact).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) } : {}),
+    ...(typeof evidence.notes === "string" ? { notes: evidence.notes } : {})
+  };
+}
+
+function readEvidenceArtifact(value: unknown): NonNullable<EvidenceManifest["artifacts"]>[number] | null {
+  const artifact = readObject(value);
+  if (!artifact) return null;
+  return {
+    ...(typeof artifact.path === "string" ? { path: artifact.path } : {}),
+    ...(typeof artifact.url === "string" ? { url: artifact.url } : {}),
+    ...(typeof artifact.kind === "string" ? { kind: artifact.kind } : {}),
+    ...(typeof artifact.label === "string" ? { label: artifact.label } : {}),
+    ...(typeof artifact.description === "string" ? { description: artifact.description } : {})
+  };
+}
+
+function contentTypeForPath(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".log":
+    case ".md":
+    case ".txt":
+      return "text/plain; charset=utf-8";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    case ".zip":
+      return "application/zip";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function encodePathSegments(filePath: string): string {
+  return filePath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function escapeHeaderQuotedString(value: string): string {
+  return value.replace(/["\\\r\n]/g, "_");
 }
 
 function readString(value: unknown): string | null {
