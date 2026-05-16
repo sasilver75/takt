@@ -27,7 +27,7 @@ import type {
   TrackerClient,
   WorkflowDefinition
 } from "../domain.js";
-import { errorMessage } from "../errors.js";
+import { errorMessage, SymphonyError } from "../errors.js";
 import { isActiveState, isTerminalState, normalizeState } from "../config/config.js";
 import type { Logger } from "../observability/logger.js";
 import { WorkspaceManager } from "../workspace/manager.js";
@@ -866,11 +866,7 @@ export class Orchestrator {
   }
 
   private async readEvidenceManifestForPublish(workspacePath: string, fileName: string): Promise<EvidenceManifest | null> {
-    try {
-      return await readEvidenceManifest(workspacePath, fileName);
-    } catch {
-      return null;
-    }
+    return await readEvidenceManifest(workspacePath, fileName);
   }
 
   private async ensureIssueReviewState(record: IssueDebugRecord, knownIssue: Issue | null, source: string, throwOnFailure: boolean): Promise<void> {
@@ -1259,8 +1255,15 @@ async function readPrReadyManifest(workspacePath: string, fileName: string): Pro
 async function readEvidenceManifest(workspacePath: string, fileName: string): Promise<EvidenceManifest | null> {
   try {
     const raw = await readFile(path.join(workspacePath, fileName), "utf8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("evidence manifest must be a JSON object");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch (error) {
+      throw new SymphonyError("invalid_evidence_manifest", `${fileName} must contain valid JSON`, error);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new SymphonyError("invalid_evidence_manifest", `${fileName} must be a JSON object`);
+    }
     const record = parsed as Record<string, unknown>;
     return {
       ...(typeof record.summary === "string" ? { summary: record.summary } : {}),

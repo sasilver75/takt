@@ -2142,7 +2142,8 @@ Use the same validation profiles as Section 17:
   top-level PR conversation comments, submitted reviews, inline comments, unresolved review
   threads, and check results as worker follow-up inputs.
 - Worker evidence extension lets workers write an implementation-defined evidence manifest that the
-  orchestrator publishes back to the PR without exposing GitHub credentials to workers.
+  orchestrator publishes back to the PR without exposing GitHub credentials to workers. Malformed
+  evidence manifests SHOULD fail visibly instead of being silently treated as absent evidence.
 - GitHub PR lifecycle extension MAY merge PRs only under an implementation-defined, documented
   policy. A safe merge policy SHOULD require the inspected head SHA, successful checks, approving
   review, non-draft PR state, and clean mergeability unless explicitly relaxed by workflow config.

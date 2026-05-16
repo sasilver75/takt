@@ -325,6 +325,62 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("fails PR publication visibly when worker evidence manifest is malformed", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-bad-evidence-"));
+    const serverPath = path.join(root, "fake-codex-bad-evidence.mjs");
+    await writeFile(serverPath, fakePrReadyWithMalformedEvidenceCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-bad-evidence", identifier: "SAM-24", state: "Todo", title: "Bad evidence manifest" });
+    const tracker = new LocalTracker([activeIssue]);
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return { number: 24, url: "https://github.test/acme/widgets/pull/24", branch: "symphony/sam-24-bad-evidence-manifest", title: "SAM-24: Bad evidence manifest", created: true };
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      pullRequestPublisher: publisher,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "retry after malformed evidence manifest");
+
+    expect(published).toHaveLength(0);
+    expect(tracker.getIssue("i-pr-bad-evidence")?.state).toBe("In Progress");
+    expect(orchestrator.issueSnapshot("SAM-24")).toMatchObject({
+      status: "retrying",
+      last_error: "SYMPHONY_EVIDENCE.json must contain valid JSON"
+    });
+    expect(
+      (orchestrator.snapshot() as { recent_events: Array<{ event: string; message?: string | null }> }).recent_events.some(
+        (event) => event.event === "pull_request_publish_failed" && event.message === "SYMPHONY_EVIDENCE.json must contain valid JSON"
+      )
+    ).toBe(true);
+    await orchestrator.stop();
+  });
+
   test("clears stale durable last_error after successful PR publication", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-clear-error-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
@@ -1356,6 +1412,29 @@ rl.on("line", (line) => {
         artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png", description: "Home page after change." }],
         notes: "No known reviewer caveats."
       }));
+      send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
+      send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+    }, 10);
+  }
+});
+`;
+}
+
+function fakePrReadyWithMalformedEvidenceCodexServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+import { writeFileSync } from "node:fs";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: {} });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" } } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
+    setTimeout(() => {
+      writeFileSync("SYMPHONY_PR_READY.json", JSON.stringify({ title: "SAM-24: Bad evidence manifest", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
+      writeFileSync("SYMPHONY_EVIDENCE.json", "{");
       send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
       send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
     }, 10);
