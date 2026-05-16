@@ -237,6 +237,7 @@ export class CodexAppServerClient {
   private async handleDynamicTool(params: JsonObject): Promise<unknown> {
     const name = typeof params.tool === "string" ? params.tool : typeof params.name === "string" ? params.name : "";
     if (name !== "linear_graphql") {
+      this.emit("unsupported_tool_call", { message: name || "(missing)" });
       return { contentItems: [{ type: "inputText", text: `Unsupported tool: ${name}` }], success: false };
     }
     const parsed = parseLinearToolArgs(params.arguments);

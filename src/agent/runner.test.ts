@@ -151,6 +151,35 @@ describe("agent runner with fake Codex app-server", () => {
 
     await expect(handle.run()).resolves.toMatchObject({ ok: false, reason: "turn_timeout" });
   });
+
+  test("returns unsupported dynamic tool failures without stalling the turn", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-unsupported-tool-"));
+    const serverPath = path.join(root, "fake-codex-unsupported-tool.mjs");
+    await writeFile(serverPath, fakeUnsupportedToolCallServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = config(root, `node ${serverPath}`);
+    const events: string[] = [];
+    const tracker = new FakeTracker([], [], [issue({ state: "Human Review" })]);
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const handle = new AgentRunHandle({
+      issue: issue(),
+      attempt: null,
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Implement {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      workspaceManager: manager,
+      tracker,
+      logger: createLogger(() => undefined),
+      onEvent: (event) => events.push(`${event.event}:${event.message ?? ""}`)
+    });
+
+    const result = await handle.run();
+    const response = JSON.parse(await readFile(path.join(manager.workspacePath("ABC-1"), "tool-response.json"), "utf8")) as { result?: { success?: unknown; contentItems?: Array<{ text?: string }> } };
+
+    expect(result.ok).toBe(true);
+    expect(response.result?.success).toBe(false);
+    expect(response.result?.contentItems?.[0]?.text).toContain("Unsupported tool: not_a_real_tool");
+    expect(events).toContain("unsupported_tool_call:not_a_real_tool");
+  });
 });
 
 function config(root: string, command: string): SymphonyConfig {
@@ -301,6 +330,31 @@ rl.on("line", (line) => {
   if (msg.method === "turn/start") {
     send({ id: msg.id, result: { turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
     send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+  }
+});
+`;
+}
+
+function fakeUnsupportedToolCallServerSource(): string {
+  return `
+import { writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: { userAgent: "fake", codexHome: process.cwd(), platformFamily: "unix", platformOs: "test" } });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" }, cwd: process.cwd(), model: "fake", modelProvider: "fake", serviceTier: null, instructionSources: [], approvalPolicy: "never", approvalsReviewer: "client", sandbox: {}, reasoningEffort: null } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+    setTimeout(() => {
+      send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+      send({ id: "tool-1", method: "item/tool/call", params: { threadId: "thread-1", turnId: "turn-1", tool: "not_a_real_tool", arguments: {} } });
+    }, 10);
+  }
+  if (msg.id === "tool-1" && msg.result) {
+    writeFileSync("tool-response.json", JSON.stringify(msg));
+    send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "completed", error: null, startedAt: 1, completedAt: 2, durationMs: 1 } } });
   }
 });
 `;
