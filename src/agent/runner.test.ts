@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -70,6 +70,44 @@ describe("agent runner with fake Codex app-server", () => {
     expect(result).toMatchObject({ ok: false, reason: "turn_input_required" });
     expect(events).toContain("turn_input_required");
     expect(tracker.stateRefreshCalls).toBe(0);
+  });
+
+  test("continues active issues on the same app-server thread up to max turns", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-continuation-"));
+    const serverPath = path.join(root, "fake-codex-continuation.mjs");
+    await writeFile(serverPath, fakeContinuationCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = config(root, `node ${serverPath}`);
+    const events: string[] = [];
+    const tracker = new FakeTracker([], [], [issue({ state: "Todo" })]);
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const handle = new AgentRunHandle({
+      issue: issue(),
+      attempt: null,
+      getConfig: () => cfg,
+      getWorkflow: () => ({
+        config: {},
+        prompt_template: "Implement {{ issue.identifier }} exactly once.",
+        path: path.join(root, "WORKFLOW.md"),
+        loaded_at: new Date().toISOString()
+      }),
+      workspaceManager: manager,
+      tracker,
+      logger: createLogger(() => undefined),
+      onEvent: (event) => {
+        if (event.event === "session_started") events.push(`${event.thread_id}:${event.turn_id}:${event.session_id}`);
+      }
+    });
+
+    const result = await handle.run();
+    const promptLog = await readFile(path.join(manager.workspacePath("ABC-1"), "turn-prompts.log"), "utf8");
+
+    expect(result.ok).toBe(true);
+    expect(events).toEqual(["thread-1:turn-1:thread-1-turn-1", "thread-1:turn-2:thread-1-turn-2"]);
+    expect(tracker.stateRefreshCalls).toBe(2);
+    expect(promptLog).toContain("turn-1:Implement ABC-1 exactly once.");
+    expect(promptLog).toContain("turn-2:Continue the same Linear issue from the existing thread history.");
+    expect(promptLog.match(/Implement ABC-1 exactly once/g)).toHaveLength(1);
   });
 });
 
@@ -170,6 +208,32 @@ rl.on("line", (line) => {
     send({ id: msg.id, result: { turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
     setTimeout(() => {
       send({ id: "input-1", method: "item/tool/requestUserInput", params: { threadId: "thread-1", turnId: "turn-1", questions: [{ id: "choice", question: "Need operator input" }] } });
+    }, 10);
+  }
+});
+`;
+}
+
+function fakeContinuationCodexServerSource(): string {
+  return `
+import { appendFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+const rl = createInterface({ input: process.stdin });
+let turnCount = 0;
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: { userAgent: "fake", codexHome: process.cwd(), platformFamily: "unix", platformOs: "test" } });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" }, cwd: process.cwd(), model: "fake", modelProvider: "fake", serviceTier: null, instructionSources: [], approvalPolicy: "never", approvalsReviewer: "client", sandbox: {}, reasoningEffort: null } });
+  if (msg.method === "turn/start") {
+    turnCount += 1;
+    const turnId = "turn-" + turnCount;
+    const text = msg.params?.input?.[0]?.text ?? "";
+    appendFileSync("turn-prompts.log", turnId + ":" + text + "\\n---\\n");
+    send({ id: msg.id, result: { turn: { id: turnId, items: [], itemsView: "all", status: "inProgress", error: null, startedAt: turnCount, completedAt: null, durationMs: null } } });
+    setTimeout(() => {
+      send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: turnId, items: [], itemsView: "all", status: "inProgress", error: null, startedAt: turnCount, completedAt: null, durationMs: null } } });
+      send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: turnId, items: [], itemsView: "all", status: "completed", error: null, startedAt: turnCount, completedAt: turnCount + 1, durationMs: 1 } } });
     }, 10);
   }
 });
