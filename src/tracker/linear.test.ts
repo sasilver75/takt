@@ -98,10 +98,10 @@ describe("linear tracker", () => {
       requests.push(request);
       if (request.query.includes("SymphonyIssueStates")) expect(request.query).toContain("$ids: [ID!]");
       if (request.query.includes("SymphonyIssuesByIdentifiers")) {
-        expect(request.query).toContain("identifier");
+        expect(request.query).toContain("number");
         expect(request.query).toContain("slugId");
         return new Response(
-          JSON.stringify({ data: { issues: { nodes: [rawIssue()], pageInfo: { hasNextPage: false, endCursor: null } } } }),
+          JSON.stringify({ data: { issues: { nodes: [rawIssue(), rawIssue({ id: "id-2", identifier: "OTHER-1" })], pageInfo: { hasNextPage: false, endCursor: null } } } }),
           { status: 200 }
         );
       }
@@ -111,7 +111,9 @@ describe("linear tracker", () => {
     expect(requests).toHaveLength(0);
     await expect(client.fetchIssueStatesByIds(["id-1"])).resolves.toHaveLength(1);
     await expect(client.fetchIssuesByIdentifiers(["ABC-1"])).resolves.toHaveLength(1);
-    expect(requests[1]?.variables).toMatchObject({ projectSlug: "demo", identifiers: ["ABC-1"], after: null });
+    expect(requests[1]?.variables).toMatchObject({ projectSlug: "demo", numbers: [1], after: null });
+    await expect(client.fetchIssuesByIdentifiers(["not-an-issue-key"])).resolves.toEqual([]);
+    expect(requests).toHaveLength(2);
   });
 
   test("normalizes labels, blockers, priority, and timestamps", () => {

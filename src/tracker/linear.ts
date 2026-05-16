@@ -92,13 +92,15 @@ export class LinearTrackerClient implements TrackerClient {
   }
 
   async fetchIssuesByIdentifiers(identifiers: string[]): Promise<Issue[]> {
-    if (identifiers.length === 0) return [];
+    const wanted = new Set(identifiers.map((identifier) => identifier.toUpperCase()));
+    const numbers = issueNumbersFromIdentifiers(identifiers);
+    if (numbers.length === 0) return [];
     const query = `
-      query SymphonyIssuesByIdentifiers($projectSlug: String!, $identifiers: [String!], $after: String) {
+      query SymphonyIssuesByIdentifiers($projectSlug: String!, $numbers: [Float!], $after: String) {
         issues(
           first: 50
           after: $after
-          filter: { project: { slugId: { eq: $projectSlug } }, identifier: { in: $identifiers } }
+          filter: { project: { slugId: { eq: $projectSlug } }, number: { in: $numbers } }
           orderBy: createdAt
         ) {
           nodes { ${ISSUE_FIELDS} }
@@ -111,11 +113,11 @@ export class LinearTrackerClient implements TrackerClient {
     for (;;) {
       const body = await this.graphql(query, {
         projectSlug: this.getConfig().tracker.project_slug,
-        identifiers,
+        numbers,
         after
       });
       const page = readConnection(body, ["data", "issues"]);
-      all.push(...page.nodes.map(normalizeIssue));
+      all.push(...page.nodes.map(normalizeIssue).filter((issue) => wanted.has(issue.identifier.toUpperCase())));
       if (!page.hasNextPage) break;
       if (!page.endCursor) throw new SymphonyError("linear_missing_end_cursor", "Linear pagination reported next page without endCursor");
       after = page.endCursor;
@@ -234,6 +236,17 @@ export class LinearTrackerClient implements TrackerClient {
     }
     return body;
   }
+}
+
+function issueNumbersFromIdentifiers(identifiers: string[]): number[] {
+  const seen = new Set<number>();
+  for (const identifier of identifiers) {
+    const match = /-(\d+)$/.exec(identifier.trim());
+    if (!match?.[1]) continue;
+    const number = Number(match[1]);
+    if (Number.isInteger(number) && number > 0) seen.add(number);
+  }
+  return [...seen];
 }
 
 export function normalizeIssue(raw: unknown): Issue {
