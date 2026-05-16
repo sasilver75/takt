@@ -33,7 +33,24 @@ describe("HTTP status server", () => {
               issue_id: "issue-1",
               status: "known",
               workspace: { path: "/tmp/symphony/ABC-1" },
-              attempts: { restart_count: 1, current_retry_attempt: null },
+              attempts: {
+                restart_count: 1,
+                current_retry_attempt: null,
+                run_attempts: [
+                  {
+                    attempt: 1,
+                    status: "succeeded",
+                    started_at: "2026-01-01T00:00:00.000Z",
+                    finished_at: "2026-01-01T00:00:12.500Z",
+                    runtime_seconds: 12.5,
+                    workspace_path: "/tmp/symphony/ABC-1",
+                    session_id: "session-1",
+                    turn_count: 2,
+                    error: null,
+                    followup: true
+                  }
+                ]
+              },
               running: null,
               retry: null,
               last_error: null,
@@ -90,6 +107,9 @@ describe("HTTP status server", () => {
     expect(issuePage).toContain("artifacts/ABC-1/home.png");
     expect(issuePage).toContain("Artifact path is not tracked by git at publish time");
     expect(issuePage).toContain("Verified in browser.");
+    expect(issuePage).toContain("Run Attempts");
+    expect(issuePage).toContain("succeeded");
+    expect(issuePage).toContain("12.5");
     expect(issuePage).toContain("Worker started");
     expect((await (await fetch(`${base}/api/v1/state`)).json()).counts.running).toBe(1);
     expect((await (await fetch(`${base}/api/v1/ABC-1`)).json()).status).toBe("known");

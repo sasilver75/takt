@@ -42,6 +42,20 @@ function durableSnapshot(): DurableStateSnapshot {
         workspace_path: null,
         restart_count: 1,
         last_error: "failed",
+        run_attempts: [
+          {
+            attempt: 1,
+            status: "failed",
+            started_at: "2026-05-15T00:00:00.000Z",
+            finished_at: "2026-05-15T00:00:04.000Z",
+            runtime_seconds: 4,
+            workspace_path: "/tmp/workspaces/SAM-1",
+            session_id: "thread-turn",
+            turn_count: 1,
+            error: "failed",
+            followup: false
+          }
+        ],
         recent_events: [{ at: "2026-05-15T00:00:00.000Z", event: "worker_exit_abnormal", issue_id: "issue-1", issue_identifier: "SAM-1", message: "failed" }],
         tracked: { github_pull_request: { number: 1, url: "https://github.test/pr/1", branch: "symphony/sam-1", title: "SAM-1", created: true } }
       }

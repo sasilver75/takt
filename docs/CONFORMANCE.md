@@ -19,7 +19,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Strict prompt rendering with issue/attempt/follow-up context | `src/workflow/prompt.ts` | `src/workflow/workflow_config.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Retry queue, continuation retries, slot-exhaustion requeue, exponential backoff cap | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
 | Active-run reconciliation and terminal cleanup | `src/orchestrator/orchestrator.ts`, `src/workspace/manager.ts` | `src/orchestrator/orchestrator.test.ts` |
-| Structured issue/session logging, token/rate-limit accounting, and runtime snapshots | `src/observability/logger.ts`, `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts`, `src/harness/toyWebappFactory.test.ts` |
+| Structured issue/session logging, token/rate-limit accounting, runtime snapshots, and bounded per-issue run-attempt history | `src/observability/logger.ts`, `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Approval/user-input policy does not stall | `src/agent/codexClient.ts`, `docs/OPERATIONS.md` | `src/agent/runner.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | CLI workflow path, port override, reconcile-once mode, and startup failure surfacing | `src/cli.ts`, `src/service.ts` | `src/cli.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 
@@ -27,7 +27,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 
 | Extension | Implementation evidence | Test / validation evidence |
 | --- | --- | --- |
-| HTTP dashboard, issue drill-down pages, and JSON API | `src/http/server.ts`, `src/service.ts` | `src/http/server.test.ts` |
+| HTTP dashboard, issue drill-down pages with run-attempt history, and JSON API | `src/http/server.ts`, `src/service.ts` | `src/http/server.test.ts` |
 | Hosted `linear_graphql` MCP bridge | `src/agent/linearGraphqlBridge.ts`, `src/agent/linearGraphqlMcp.ts`, `src/tracker/linear.ts` | `src/agent/linearGraphqlBridge.test.ts`, `src/agent/linearGraphqlMcp.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Durable state | `src/persistence/jsonStateStore.ts`, `src/orchestrator/orchestrator.ts` | `src/persistence/jsonStateStore.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | GitHub PR publishing, handoff-manifest hygiene, lifecycle reconciliation, and human-merge recovery | `src/github/publisher.ts`, `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/publisher.test.ts`, `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts` |
@@ -48,6 +48,6 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 ## Known Gaps And Watch Items
 
 - Mutating full-loop real integration checks are operator-run, not automatic CI gates, because they touch Linear/GitHub and require live credentials. A non-mutating readiness profile exists and reports skipped status unless explicitly enabled.
-- The HTTP dashboard is functional and state-backed, including per-issue drill-down pages; richer long-term run history, full artifact browsing, and external artifact retention remain product work.
+- The HTTP dashboard is functional and state-backed, including per-issue drill-down pages and bounded worker run-attempt history; full artifact browsing, external artifact retention, and cross-run analytics remain product work.
 - Workers can attach durable artifacts through committed files, or by listing small workspace-contained files/directories under `artifacts/` in the evidence manifest so Symphony uploads them to the PR branch. Large binary artifact retention, external object storage, video capture conventions, and trace viewers are not yet first-class orchestration features.
 - The spec's SSH worker appendix is not implemented; Docker is the first-class isolation runtime.

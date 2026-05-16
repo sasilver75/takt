@@ -22,6 +22,7 @@ import type {
   PullRequestPublisher,
   PullRequestTracker,
   PrReadyManifest,
+  RunAttemptRecord,
   SymphonyConfig,
   TrackerClient,
   WorkflowDefinition
@@ -217,7 +218,8 @@ export class Orchestrator {
       workspace: { path: running?.workspace_path ?? record?.workspace_path ?? null },
       attempts: {
         restart_count: record?.restart_count ?? 0,
-        current_retry_attempt: retry?.attempt ?? null
+        current_retry_attempt: retry?.attempt ?? null,
+        run_attempts: record?.run_attempts ?? []
       },
       running: running
         ? {
@@ -683,7 +685,9 @@ export class Orchestrator {
     };
     this.state.running.set(runIssue.id, entry);
     this.state.retry_attempts.delete(runIssue.id);
-    this.ensureRecord(runIssue).restart_count += attempt ? 1 : 0;
+    const record = this.ensureRecord(runIssue);
+    record.restart_count += attempt ? 1 : 0;
+    this.startRunAttempt(record, entry, followupContext);
     this.recordEvent({ at: new Date().toISOString(), event: "dispatch", issue_id: runIssue.id, issue_identifier: runIssue.identifier });
     void handle.run().then((result) => void this.onWorkerExit(runIssue.id, result));
   }
@@ -732,6 +736,7 @@ export class Orchestrator {
     this.state.codex_totals.seconds_running += result.runtime_seconds;
     const record = this.ensureRecord(entry.issue);
     record.workspace_path = result.workspace_path ?? entry.workspace_path;
+    this.finishRunAttempt(record, entry, result);
     if (result.ok) {
       if (await this.tryPublishPullRequest(entry.issue, record.workspace_path)) {
         this.state.completed.add(issueId);
@@ -1081,10 +1086,50 @@ export class Orchestrator {
       restart_count: 0,
       last_error: null,
       recent_events: [],
+      run_attempts: [],
       tracked: {}
     };
     this.state.issue_history.set(issue.identifier, record);
     return record;
+  }
+
+  private startRunAttempt(record: IssueDebugRecord, entry: RunningEntry, followupContext: string | null): void {
+    record.run_attempts.push({
+      attempt: entry.retry_attempt,
+      status: "running",
+      started_at: entry.started_at,
+      finished_at: null,
+      runtime_seconds: null,
+      workspace_path: entry.workspace_path,
+      session_id: null,
+      turn_count: 0,
+      error: null,
+      followup: Boolean(followupContext)
+    });
+    trimRunAttempts(record);
+  }
+
+  private finishRunAttempt(
+    record: IssueDebugRecord,
+    entry: RunningEntry,
+    result: { ok: boolean; runtime_seconds: number; error?: string; workspace_path?: string }
+  ): void {
+    const attempt = [...record.run_attempts].reverse().find((item) => item.status === "running" && item.started_at === entry.started_at);
+    const updated: RunAttemptRecord = {
+      attempt: entry.retry_attempt,
+      status: result.ok ? "succeeded" : "failed",
+      started_at: entry.started_at,
+      finished_at: new Date().toISOString(),
+      runtime_seconds: result.runtime_seconds,
+      workspace_path: result.workspace_path ?? entry.workspace_path,
+      session_id: entry.session_id,
+      turn_count: entry.turn_count,
+      error: result.error ?? null,
+      followup: attempt?.followup ?? false
+    };
+    if (attempt) Object.assign(attempt, updated);
+    else record.run_attempts.push(updated);
+    trimRunAttempts(record);
   }
 
   private recordEvent(event: RuntimeEvent): void {
@@ -1157,6 +1202,10 @@ export function sortForDispatch(issues: Issue[]): Issue[] {
 
 function nextAttempt(current: number | null): number {
   return current === null ? 1 : current + 1;
+}
+
+function trimRunAttempts(record: IssueDebugRecord): void {
+  if (record.run_attempts.length > 50) record.run_attempts.splice(0, record.run_attempts.length - 50);
 }
 
 async function readPrReadyManifest(workspacePath: string, fileName: string): Promise<PrReadyManifest | null> {

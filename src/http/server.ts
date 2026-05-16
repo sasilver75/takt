@@ -219,6 +219,7 @@ function renderIssuePage(snapshot: unknown): string {
   </header>
   <main>
     <section><h2>Issue</h2>${renderIssueDefinitionList(issue)}</section>
+    <section><h2>Run Attempts</h2>${renderRunAttempts(issue)}</section>
     <section><h2>Pull Request</h2>${renderPullRequestDetails(pullRequest, pullRequestStatus, tracked)}</section>
     <section><h2>Evidence</h2>${renderIssueEvidenceDetails(evidence, tracked)}</section>
     <section><h2>Recent Events</h2><table><thead><tr><th>Time</th><th>Event</th><th>Session</th><th>Message</th></tr></thead><tbody>${eventRows}</tbody></table></section>
@@ -232,12 +233,25 @@ type IssuePageSnapshot = {
   issue_id?: string;
   status?: string;
   workspace?: { path?: string | null } | null;
-  attempts?: { restart_count?: number; current_retry_attempt?: number | null } | null;
+  attempts?: { restart_count?: number; current_retry_attempt?: number | null; run_attempts?: RunAttemptPageRecord[]; history?: RunAttemptPageRecord[] } | null;
   running?: { session_id?: string | null; turn_count?: number; last_event?: string | null; last_message?: string | null; last_event_at?: string | null } | null;
   retry?: { attempt?: number; due_at?: string; error?: string | null; context?: string | null } | null;
   recent_events?: Array<{ at?: string; event?: string; session_id?: string | null; message?: string | null }>;
   last_error?: string | null;
   tracked?: Record<string, unknown>;
+};
+
+type RunAttemptPageRecord = {
+  attempt?: number | null;
+  status?: string;
+  started_at?: string;
+  finished_at?: string | null;
+  runtime_seconds?: number | null;
+  workspace_path?: string | null;
+  session_id?: string | null;
+  turn_count?: number;
+  error?: string | null;
+  followup?: boolean;
 };
 
 function renderIssueDefinitionList(issue: IssuePageSnapshot): string {
@@ -252,6 +266,20 @@ function renderIssueDefinitionList(issue: IssuePageSnapshot): string {
     <dt>Last Event</dt><dd>${escapeHtml(issue.running?.last_event ?? "")}</dd>
     <dt>Last Error</dt><dd>${escapeHtml(issue.last_error ?? "")}</dd>
   </dl>`;
+}
+
+function renderRunAttempts(issue: IssuePageSnapshot): string {
+  const attempts = issue.attempts?.run_attempts ?? issue.attempts?.history ?? [];
+  if (attempts.length === 0) return "<p>No worker run attempts have been recorded for this issue.</p>";
+  const rows = attempts
+    .slice(-50)
+    .reverse()
+    .map(
+      (attempt) =>
+        `<tr><td>${escapeHtml(attempt.started_at ?? "")}</td><td>${escapeHtml(attempt.finished_at ?? "")}</td><td>${escapeHtml(attempt.status ?? "")}</td><td>${attempt.attempt ?? ""}</td><td>${attempt.runtime_seconds ?? ""}</td><td>${attempt.turn_count ?? 0}</td><td>${attempt.followup ? "yes" : ""}</td><td>${escapeHtml(attempt.session_id ?? "")}</td><td>${escapeHtml(attempt.error ?? "")}</td></tr>`
+    )
+    .join("");
+  return `<table><thead><tr><th>Started</th><th>Finished</th><th>Status</th><th>Attempt</th><th>Runtime</th><th>Turns</th><th>Follow-up</th><th>Session</th><th>Error</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderPullRequestDetails(pullRequest: Record<string, unknown> | null, status: Record<string, unknown> | null, tracked: Record<string, unknown>): string {

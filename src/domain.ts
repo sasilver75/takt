@@ -401,12 +401,28 @@ export type RuntimeEvent = {
   message?: string | null;
 };
 
+export type RunAttemptStatus = "running" | "succeeded" | "failed";
+
+export type RunAttemptRecord = {
+  attempt: number | null;
+  status: RunAttemptStatus;
+  started_at: string;
+  finished_at: string | null;
+  runtime_seconds: number | null;
+  workspace_path: string | null;
+  session_id: string | null;
+  turn_count: number;
+  error: string | null;
+  followup: boolean;
+};
+
 export type IssueDebugRecord = {
   issue_id: string;
   issue_identifier: string;
   workspace_path: string | null;
   restart_count: number;
   last_error: string | null;
+  run_attempts: RunAttemptRecord[];
   recent_events: RuntimeEvent[];
   tracked: Record<string, unknown>;
 };

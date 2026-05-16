@@ -60,6 +60,20 @@ describe("orchestrator", () => {
     expect(snapshot.rate_limits).toEqual({ primary: { used: 1, limit: 100 } });
     expect(snapshot.recent_events.some((event) => event.event === "dispatch" && event.issue_identifier === "ABC-1")).toBe(true);
     expect(snapshot.recent_events.some((event) => event.event === "turn/completed" && event.issue_identifier === "ABC-1")).toBe(true);
+    expect(orchestrator.issueSnapshot("ABC-1")).toMatchObject({
+      attempts: {
+        run_attempts: [
+          {
+            attempt: null,
+            status: "succeeded",
+            workspace_path: manager.workspacePath("ABC-1"),
+            turn_count: 1,
+            error: null,
+            followup: false
+          }
+        ]
+      }
+    });
     await orchestrator.stop();
   });
 
@@ -133,6 +147,15 @@ describe("orchestrator", () => {
     expect(tracker.comments[0]?.body).toContain("https://github.test/acme/widgets/pull/9");
     expect(orchestrator.issueSnapshot("SAM-9")).toMatchObject({
       status: "completed",
+      attempts: {
+        run_attempts: [
+          {
+            status: "succeeded",
+            turn_count: 1,
+            followup: false
+          }
+        ]
+      },
       tracked: { github_pull_request: { url: "https://github.test/acme/widgets/pull/9" } }
     });
     await tracker.transitionIssue(activeIssue, "In Progress");
@@ -272,6 +295,7 @@ describe("orchestrator", () => {
               workspace_path: null,
               restart_count: 0,
               last_error: "old push rejection",
+              run_attempts: [],
               recent_events: [],
               tracked: {}
             }
@@ -1049,6 +1073,7 @@ describe("orchestrator", () => {
       workspace_path: null,
       restart_count: 0,
       last_error: null,
+      run_attempts: [],
       recent_events: [],
       tracked: {
         github_pull_request: {
@@ -1582,6 +1607,7 @@ function durableSnapshot(dueAtMs: number): DurableStateSnapshot {
         workspace_path: null,
         restart_count: 1,
         last_error: "verify failed",
+        run_attempts: [],
         recent_events: [],
         tracked: {
           github_pull_request: {

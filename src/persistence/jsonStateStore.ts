@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { DurableStateSnapshot, DurableStateStore, IssueDebugRecord, RuntimeEvent, SymphonyConfig } from "../domain.js";
+import type { DurableStateSnapshot, DurableStateStore, IssueDebugRecord, RunAttemptRecord, RuntimeEvent, SymphonyConfig } from "../domain.js";
 import { errorMessage } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 
@@ -89,8 +89,29 @@ function normalizeIssueRecord(value: unknown): IssueDebugRecord | null {
     workspace_path: stringOrNull(record.workspace_path),
     restart_count: nonNegativeInteger(record.restart_count),
     last_error: stringOrNull(record.last_error),
+    run_attempts: array(record.run_attempts).map((entry) => normalizeRunAttempt(entry)).filter((entry): entry is RunAttemptRecord => Boolean(entry)).slice(-50),
     recent_events: array(record.recent_events).map((entry) => normalizeEvent(entry)).filter((entry): entry is RuntimeEvent => Boolean(entry)),
     tracked
+  };
+}
+
+function normalizeRunAttempt(value: unknown): RunAttemptRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const startedAt = stringOrNull(record.started_at);
+  if (!startedAt) return null;
+  const status = record.status === "running" || record.status === "succeeded" || record.status === "failed" ? record.status : "failed";
+  return {
+    attempt: record.attempt === null ? null : nonNegativeIntegerOrNull(record.attempt),
+    status,
+    started_at: startedAt,
+    finished_at: stringOrNull(record.finished_at),
+    runtime_seconds: finiteNumberOrNull(record.runtime_seconds),
+    workspace_path: stringOrNull(record.workspace_path),
+    session_id: stringOrNull(record.session_id),
+    turn_count: nonNegativeInteger(record.turn_count),
+    error: stringOrNull(record.error),
+    followup: record.followup === true
   };
 }
 
@@ -138,6 +159,10 @@ function positiveIntegerOrNull(value: unknown): number | null {
 
 function nonNegativeInteger(value: unknown): number {
   return Number.isInteger(value) && Number(value) >= 0 ? Number(value) : 0;
+}
+
+function nonNegativeIntegerOrNull(value: unknown): number | null {
+  return Number.isInteger(value) && Number(value) >= 0 ? Number(value) : null;
 }
 
 function finiteNumberOrNull(value: unknown): number | null {
