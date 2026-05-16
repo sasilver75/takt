@@ -10,6 +10,8 @@ import type {
   PullRequestReviewStatus,
   PullRequestReviewThreadSummary,
   PullRequestTracker,
+  PullRequestDiscoveryOptions,
+  PullRequestDiscoveryState,
   SymphonyConfig
 } from "../domain.js";
 import { SymphonyError } from "../errors.js";
@@ -75,30 +77,40 @@ export class GitHubPullRequestTracker implements PullRequestTracker {
   }
 
   async discoverOpen(): Promise<DiscoveredPullRequest[]> {
+    return this.discoverManaged({ states: ["open"] });
+  }
+
+  async discoverManaged(options: PullRequestDiscoveryOptions = {}): Promise<DiscoveredPullRequest[]> {
     const config = this.getConfig().github;
     if (!config.owner || !config.repo) throw new SymphonyError("github_not_configured", "GitHub owner/repo are required for PR discovery");
     const branchPrefix = `${config.branch_prefix.replace(/\/+$/g, "")}/`;
+    const states = normalizedDiscoveryStates(options.states);
     const discovered: DiscoveredPullRequest[] = [];
-    for (let page = 1; ; page += 1) {
-      const payload = await this.api.request<unknown[]>(
-        "GET",
-        `/repos/${config.owner}/${config.repo}/pulls?state=open&base=${encodeURIComponent(config.base_branch)}&per_page=100&page=${page}`
-      );
-      const pulls = Array.isArray(payload) ? payload.filter((pr): pr is Record<string, unknown> => Boolean(pr) && typeof pr === "object") : [];
-      for (const pr of pulls) {
-        const branch = readNestedString(pr, ["head", "ref"]);
-        if (!branch?.startsWith(branchPrefix)) continue;
-        const issueIdentifier = inferIssueIdentifier(pr, branch, branchPrefix);
-        if (!issueIdentifier) continue;
-        const number = readNumber(pr.number, 0);
-        const url = readString(pr.html_url);
-        const title = readString(pr.title);
-        if (!number || !url || !title) continue;
-        discovered.push({ number, url, branch, title, created: false, issue_identifier: issueIdentifier });
+    const seen = new Set<number>();
+    for (const state of states) {
+      for (let page = 1; ; page += 1) {
+        const payload = await this.api.request<unknown[]>(
+          "GET",
+          `/repos/${config.owner}/${config.repo}/pulls?state=${state}&base=${encodeURIComponent(config.base_branch)}&sort=updated&direction=desc&per_page=100&page=${page}`
+        );
+        const pulls = Array.isArray(payload) ? payload.filter((pr): pr is Record<string, unknown> => Boolean(pr) && typeof pr === "object") : [];
+        for (const pr of pulls) {
+          const branch = readNestedString(pr, ["head", "ref"]);
+          if (!branch?.startsWith(branchPrefix)) continue;
+          const issueIdentifier = inferIssueIdentifier(pr, branch, branchPrefix);
+          if (!issueIdentifier) continue;
+          const number = readNumber(pr.number, 0);
+          const url = readString(pr.html_url);
+          const title = readString(pr.title);
+          if (!number || !url || !title || seen.has(number)) continue;
+          seen.add(number);
+          discovered.push({ number, url, branch, title, created: false, issue_identifier: issueIdentifier });
+        }
+        if (pulls.length < 100) break;
+        if (state === "closed" && page >= CLOSED_PULL_REQUEST_RECOVERY_PAGE_LIMIT) break;
       }
-      if (pulls.length < 100) break;
     }
-    this.logger.info("github prs discovered", { count: discovered.length, branch_prefix: branchPrefix });
+    this.logger.info("github prs discovered", { count: discovered.length, branch_prefix: branchPrefix, states });
     return discovered;
   }
 
@@ -157,6 +169,8 @@ export class GitHubPullRequestTracker implements PullRequestTracker {
     }
   }
 }
+
+const CLOSED_PULL_REQUEST_RECOVERY_PAGE_LIMIT = 5;
 
 const REVIEW_THREADS_QUERY = `
 query SymphonyPullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!) {
@@ -317,6 +331,15 @@ export function inferIssueIdentifier(pr: Record<string, unknown>, branch: string
   const branchMatch = /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/i.exec(slug);
   if (!branchMatch?.[1] || !branchMatch[2]) return null;
   return `${branchMatch[1].toUpperCase()}-${branchMatch[2]}`;
+}
+
+function normalizedDiscoveryStates(states: PullRequestDiscoveryState[] | undefined): PullRequestDiscoveryState[] {
+  const requested = states && states.length > 0 ? states : ["open"];
+  const out: PullRequestDiscoveryState[] = [];
+  for (const state of requested) {
+    if ((state === "open" || state === "closed") && !out.includes(state)) out.push(state);
+  }
+  return out.length > 0 ? out : ["open"];
 }
 
 function readLifecycleState(pr: Record<string, unknown>): PullRequestInspection["state"] {

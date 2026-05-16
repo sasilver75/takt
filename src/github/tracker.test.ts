@@ -147,7 +147,7 @@ describe("GitHub PR tracker", () => {
     expect(classifyReviews([])).toBe("review_required");
   });
 
-  test("discovers open Symphony pull requests and infers Linear issue identifiers", async () => {
+  test("discovers open and recently closed Symphony pull requests and infers Linear issue identifiers", async () => {
     const requests: string[] = [];
     const fetchImpl: typeof fetch = async (url) => {
       requests.push(String(url));
@@ -168,11 +168,24 @@ describe("GitHub PR tracker", () => {
           }
         ]);
       }
+      if (String(url).includes("/pulls?state=closed")) {
+        return jsonResponse([
+          {
+            number: 10,
+            html_url: "https://github.test/acme/widgets/pull/10",
+            title: "SAM-10: Human merged while Symphony was offline",
+            body: "Linear: SAM-10",
+            state: "closed",
+            merged_at: "2026-05-16T12:00:00Z",
+            head: { ref: "symphony/sam-10-human-merged-while-symphony-was-offline" }
+          }
+        ]);
+      }
       return jsonResponse({ message: "not found" }, 404);
     };
     const tracker = new GitHubPullRequestTracker(() => config("/tmp/symphony-gh-discover"), createLogger(() => undefined), fetchImpl);
 
-    await expect(tracker.discoverOpen()).resolves.toEqual([
+    await expect(tracker.discoverManaged({ states: ["open", "closed"] })).resolves.toEqual([
       {
         number: 8,
         url: "https://github.test/acme/widgets/pull/8",
@@ -180,9 +193,18 @@ describe("GitHub PR tracker", () => {
         title: "SAM-8: Recover after restart",
         created: false,
         issue_identifier: "SAM-8"
+      },
+      {
+        number: 10,
+        url: "https://github.test/acme/widgets/pull/10",
+        branch: "symphony/sam-10-human-merged-while-symphony-was-offline",
+        title: "SAM-10: Human merged while Symphony was offline",
+        created: false,
+        issue_identifier: "SAM-10"
       }
     ]);
     expect(requests[0]).toContain("state=open");
+    expect(requests[1]).toContain("state=closed");
     expect(requests[0]).toContain("base=main");
     expect(inferIssueIdentifier({ title: "fallback" }, "symphony/abc-12-title", "symphony/")).toBe("ABC-12");
   });

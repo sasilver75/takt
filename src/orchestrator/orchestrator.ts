@@ -55,6 +55,7 @@ export class Orchestrator {
   private ticking = false;
   private stopped = false;
   private persistenceChain: Promise<void> = Promise.resolve();
+  private closedPullRequestRecoveryDone = false;
 
   constructor(private readonly options: OrchestratorOptions) {
     const config = options.getConfig();
@@ -301,10 +302,16 @@ export class Orchestrator {
   }
 
   private async recoverPullRequests(): Promise<void> {
-    if (!this.options.getConfig().github.enabled || !this.options.pullRequestTracker?.discoverOpen) return;
+    if (!this.options.getConfig().github.enabled || !this.options.pullRequestTracker) return;
+    const discoveryStates: Array<"open" | "closed"> = this.closedPullRequestRecoveryDone ? ["open"] : ["open", "closed"];
     let discovered: DiscoveredPullRequest[];
     try {
-      discovered = await this.options.pullRequestTracker.discoverOpen();
+      discovered = this.options.pullRequestTracker.discoverManaged
+        ? await this.options.pullRequestTracker.discoverManaged({ states: [...discoveryStates] })
+        : this.options.pullRequestTracker.discoverOpen
+          ? await this.options.pullRequestTracker.discoverOpen()
+          : [];
+      this.closedPullRequestRecoveryDone = this.closedPullRequestRecoveryDone || discoveryStates.includes("closed");
     } catch (error) {
       this.options.logger.warn("github pr discovery failed", { error: errorMessage(error) });
       return;

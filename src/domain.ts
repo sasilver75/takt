@@ -221,6 +221,12 @@ export type DiscoveredPullRequest = PublishedPullRequest & {
   issue_identifier: string;
 };
 
+export type PullRequestDiscoveryState = "open" | "closed";
+
+export type PullRequestDiscoveryOptions = {
+  states?: PullRequestDiscoveryState[];
+};
+
 export type PullRequestPublisher = {
   publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest; evidenceManifest?: EvidenceManifest | null }): Promise<PublishedPullRequest>;
 };
@@ -306,6 +312,7 @@ export type PullRequestInspection = {
 export type PullRequestTracker = {
   inspect(input: PublishedPullRequest): Promise<PullRequestInspection>;
   discoverOpen?(): Promise<DiscoveredPullRequest[]>;
+  discoverManaged?(options?: PullRequestDiscoveryOptions): Promise<DiscoveredPullRequest[]>;
 };
 
 export type PullRequestMergeResult = {

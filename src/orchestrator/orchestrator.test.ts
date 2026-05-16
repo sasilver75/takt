@@ -902,6 +902,63 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("recovers human-merged Symphony PRs after restart and moves tracker issue to completion", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-recover-merged-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      tracker: {
+        ...config(root, "node missing.js").tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human",
+        terminal_states: ["Done"]
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token",
+        merge: { ...githubMergeDisabled(), enabled: false, complete_state: "Done" }
+      }
+    };
+    const reviewIssue = issue({ id: "i-pr-recover-merged", identifier: "SAM-22", state: "Needs Human", title: "Merged while offline" });
+    const tracker = new LocalTracker([reviewIssue]);
+    const discoveredStates: unknown[] = [];
+    const pullRequestTracker: PullRequestTracker = {
+      async discoverManaged(options) {
+        discoveredStates.push(options?.states);
+        return [mergedDiscoveredPullRequest()];
+      },
+      async inspect() {
+        return mergedInspection();
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+
+    expect(discoveredStates).toEqual([["open", "closed"]]);
+    expect(tracker.getIssue("i-pr-recover-merged")?.state).toBe("Done");
+    expect(orchestrator.issueSnapshot("SAM-22")).toMatchObject({
+      status: "completed",
+      tracked: {
+        github_pr_recovered: true,
+        github_pr_terminal_state: "merged",
+        tracker_completion_state: "Done",
+        tracker_completion_state_source: "pull_request_reconcile"
+      }
+    });
+    await orchestrator.stop();
+  });
+
   test("ignores restored PR tracking outside the current branch prefix", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-prefix-"));
     const cfg = {
@@ -1423,6 +1480,39 @@ function discoveredPullRequest(): DiscoveredPullRequest {
     title: "SAM-11: Recovered PR should not redispatch",
     created: false,
     issue_identifier: "SAM-11"
+  };
+}
+
+function mergedDiscoveredPullRequest(): DiscoveredPullRequest {
+  return {
+    number: 22,
+    url: "https://github.test/acme/widgets/pull/22",
+    branch: "symphony/sam-22-merged-while-offline",
+    title: "SAM-22: Merged while offline",
+    created: false,
+    issue_identifier: "SAM-22"
+  };
+}
+
+function mergedInspection(): PullRequestInspection {
+  return {
+    number: 22,
+    url: "https://github.test/acme/widgets/pull/22",
+    branch: "symphony/sam-22-merged-while-offline",
+    title: "SAM-22: Merged while offline",
+    state: "merged",
+    checks_status: "success",
+    review_status: "unknown",
+    head_sha: "merged-head-sha",
+    mergeable_state: "unknown",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: "PR #22 is merged; checks=success; review=unknown at merged-head-sha.",
+    checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/22" }],
+    reviews: [],
+    review_comments: [],
+    issue_comments: [],
+    review_threads: []
   };
 }
 
