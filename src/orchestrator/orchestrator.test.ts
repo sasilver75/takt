@@ -123,6 +123,87 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("clears stale durable last_error after successful PR publication", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-clear-error-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-clear-error", identifier: "SAM-15", state: "Todo", title: "Clear stale error" });
+    const tracker = new LocalTracker([activeIssue]);
+    const saved: DurableStateSnapshot[] = [];
+    const durableStore: DurableStateStore = {
+      async load() {
+        return {
+          schema_version: 1,
+          saved_at: new Date().toISOString(),
+          retry_attempts: [],
+          completed_issue_ids: [],
+          issue_history: [
+            {
+              issue_id: activeIssue.id,
+              issue_identifier: activeIssue.identifier,
+              workspace_path: null,
+              restart_count: 0,
+              last_error: "old push rejection",
+              recent_events: [],
+              tracked: {}
+            }
+          ],
+          recent_events: [],
+          codex_totals: { input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0 },
+          codex_rate_limits: null
+        };
+      },
+      async save(snapshot) {
+        saved.push(snapshot);
+      }
+    };
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return { number: 15, url: "https://github.test/acme/widgets/pull/15", branch: "symphony/sam-15-clear-stale-error", title: "SAM-15: Clear stale error", created: true };
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      durableStore,
+      pullRequestPublisher: publisher,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.start();
+    await waitFor(() => published.length === 1, "pull request publication after stale error");
+
+    expect(orchestrator.issueSnapshot("SAM-15")).toMatchObject({
+      status: "completed",
+      last_error: null,
+      tracked: { github_pull_request: { number: 15 } }
+    });
+    await orchestrator.stop();
+    expect(saved.at(-1)?.issue_history.find((record) => record.issue_identifier === "SAM-15")?.last_error).toBeNull();
+  });
+
   test("reconciles tracker review state for open PRs after external automation moves it back", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-review-state-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");

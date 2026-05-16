@@ -322,6 +322,7 @@ export class Orchestrator {
       record.tracked.github_pull_request = pullRequest;
       record.tracked.github_pr_recovered = true;
       record.tracked.github_pr_recovered_at = new Date().toISOString();
+      record.last_error = null;
       this.state.completed.add(issue.id);
       this.recordEvent({
         at: new Date().toISOString(),
@@ -388,6 +389,7 @@ export class Orchestrator {
         });
         continue;
       }
+      record.last_error = null;
       record.tracked.github_pull_request_status = inspection;
       const statusKey = pullRequestStatusKey(inspection);
       if (record.tracked.github_pr_status_key !== statusKey) {
@@ -492,6 +494,7 @@ export class Orchestrator {
     record.tracked.github_pr_last_followup_key = `feedback:${feedback.map((item) => item.key).sort().join("|")}`;
     record.tracked.github_pr_followup_reason = reason;
     record.tracked.github_pr_followup_context = context;
+    record.last_error = null;
     this.state.completed.delete(record.issue_id);
     this.state.claimed.delete(record.issue_id);
     if (this.shouldDispatch(dispatchIssue)) {
@@ -687,6 +690,7 @@ export class Orchestrator {
       await this.options.tracker.commentOnIssue?.(issue, `Published PR: ${published.url}`);
       await this.ensureIssueReviewState(record, issue, "pull_request_publish", true);
       this.markPullRequestFollowupHandled(record);
+      record.last_error = null;
       this.recordEvent({
         at: new Date().toISOString(),
         event: "pull_request_published",
@@ -765,6 +769,7 @@ export class Orchestrator {
       record.tracked.tracker_review_state = issue.state;
       record.tracked.tracker_review_state_checked_at = checkedAt;
       record.tracked.tracker_review_state_source = source;
+      record.last_error = null;
       return;
     }
 
@@ -773,6 +778,7 @@ export class Orchestrator {
       record.tracked.tracker_review_state = updated.state;
       record.tracked.tracker_review_state_checked_at = checkedAt;
       record.tracked.tracker_review_state_source = source;
+      record.last_error = null;
       this.recordEvent({
         at: checkedAt,
         event: "issue_review_state_reconciled",
