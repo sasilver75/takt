@@ -6,6 +6,8 @@ import type {
   DiscoveredPullRequest,
   DurableStateSnapshot,
   DurableStateStore,
+  EvidenceArtifact,
+  EvidenceManifest,
   Issue,
   IssueDebugRecord,
   GraphqlToolExecutor,
@@ -16,6 +18,7 @@ import type {
   PublishedPullRequest,
   PullRequestMerger,
   PullRequestInspection,
+  PullRequestEvidencePublisher,
   PullRequestPublisher,
   PullRequestTracker,
   PrReadyManifest,
@@ -42,6 +45,7 @@ export type OrchestratorOptions = {
   pullRequestPublisher?: PullRequestPublisher | null | undefined;
   pullRequestTracker?: PullRequestTracker | null | undefined;
   pullRequestMerger?: PullRequestMerger | null | undefined;
+  pullRequestEvidencePublisher?: PullRequestEvidencePublisher | null | undefined;
   durableStore?: DurableStateStore | null | undefined;
 };
 
@@ -745,6 +749,7 @@ export class Orchestrator {
       const published = await this.options.pullRequestPublisher.publish({ issue, workspacePath, manifest });
       const record = this.ensureRecord(issue);
       record.tracked.github_pull_request = published;
+      await this.publishPullRequestEvidence(record, published, workspacePath);
       await this.options.tracker.commentOnIssue?.(issue, `Published PR: ${published.url}`);
       await this.ensureIssueReviewState(record, issue, "pull_request_publish", true);
       this.markPullRequestFollowupHandled(record);
@@ -768,6 +773,53 @@ export class Orchestrator {
         message
       });
       return false;
+    }
+  }
+
+  private async publishPullRequestEvidence(record: IssueDebugRecord, pullRequest: PublishedPullRequest, workspacePath: string): Promise<void> {
+    if (!this.options.pullRequestEvidencePublisher) return;
+    const config = this.options.getConfig();
+    let manifest: EvidenceManifest | null = null;
+    try {
+      manifest = await readEvidenceManifest(workspacePath, config.github.evidence_file);
+    } catch (error) {
+      const message = errorMessage(error);
+      record.tracked.github_evidence_last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_evidence_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message
+      });
+      return;
+    }
+    if (!manifest) return;
+
+    try {
+      const previousCommentId = typeof record.tracked.github_evidence_comment_id === "number" ? record.tracked.github_evidence_comment_id : null;
+      const published = await this.options.pullRequestEvidencePublisher.publish({ pullRequest, workspacePath, manifest, previousCommentId });
+      record.tracked.github_evidence_comment_id = published.comment_id;
+      record.tracked.github_evidence_comment_url = published.url;
+      record.tracked.github_evidence_published_at = new Date().toISOString();
+      delete record.tracked.github_evidence_last_error;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_evidence_published",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: published.url
+      });
+    } catch (error) {
+      const message = errorMessage(error);
+      record.tracked.github_evidence_last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_evidence_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message
+      });
     }
   }
 
@@ -1086,6 +1138,37 @@ async function readPrReadyManifest(workspacePath: string, fileName: string): Pro
   }
 }
 
+async function readEvidenceManifest(workspacePath: string, fileName: string): Promise<EvidenceManifest | null> {
+  try {
+    const raw = await readFile(path.join(workspacePath, fileName), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("evidence manifest must be a JSON object");
+    const record = parsed as Record<string, unknown>;
+    return {
+      ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+      ...(Array.isArray(record.verification) ? { verification: record.verification.filter((entry): entry is string => typeof entry === "string") } : {}),
+      ...(Array.isArray(record.app_urls) ? { app_urls: record.app_urls.filter((entry): entry is string => typeof entry === "string") } : {}),
+      ...(Array.isArray(record.artifacts) ? { artifacts: record.artifacts.map(readEvidenceArtifact).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) } : {}),
+      ...(typeof record.notes === "string" ? { notes: record.notes } : {})
+    };
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function readEvidenceArtifact(value: unknown): EvidenceArtifact | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    ...(typeof record.path === "string" ? { path: record.path } : {}),
+    ...(typeof record.url === "string" ? { url: record.url } : {}),
+    ...(typeof record.kind === "string" ? { kind: record.kind } : {}),
+    ...(typeof record.label === "string" ? { label: record.label } : {}),
+    ...(typeof record.description === "string" ? { description: record.description } : {})
+  };
+}
+
 function readTrackedPullRequest(value: unknown): PublishedPullRequest | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -1129,14 +1212,47 @@ function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledK
     });
   }
 
-  if (inspection.review_status !== "approved") {
-    for (const review of latestReviewsByReviewer(inspection.reviews, ["COMMENTED"]).filter((review) => Boolean(review.body?.trim()))) {
+  for (const comment of inspection.issue_comments ?? []) {
+    feedback.push({
+      key: feedbackKey("issue_comment", {
+        author: comment.author,
+        created_at: comment.created_at,
+        updated_at: comment.updated_at,
+        url: comment.url,
+        body: comment.body
+      }),
+      reason: "GitHub PR conversation comments need attention"
+    });
+  }
+  for (const review of latestReviewsByReviewer(inspection.reviews, ["COMMENTED"]).filter((review) => Boolean(review.body?.trim()))) {
+    feedback.push({
+      key: feedbackKey("review_comment", reviewIdentity(review)),
+      reason: "GitHub review comments need attention"
+    });
+  }
+  const unresolvedThreads = actionableReviewThreads(inspection);
+  if (unresolvedThreads.length > 0) {
+    for (const thread of unresolvedThreads) {
       feedback.push({
-        key: feedbackKey("review_comment", reviewIdentity(review)),
-        reason: "GitHub review comments need attention"
+        key: feedbackKey("review_thread", {
+          id: thread.id,
+          is_outdated: thread.is_outdated,
+          path: thread.path,
+          line: thread.line,
+          comments: thread.comments.map((comment) => ({
+            author: comment.author,
+            created_at: comment.created_at,
+            updated_at: comment.updated_at,
+            commit_id: comment.commit_id,
+            url: comment.url,
+            body: comment.body
+          }))
+        }),
+        reason: "GitHub unresolved review threads need attention"
       });
     }
-    for (const comment of inspection.review_comments) {
+  } else if ((inspection.review_threads ?? []).length === 0) {
+    for (const comment of inspection.review_comments ?? []) {
       feedback.push({
         key: feedbackKey("inline_comment", {
           author: comment.author,
@@ -1181,6 +1297,10 @@ function actionableChecks(inspection: PullRequestInspection): PullRequestInspect
     const conclusion = check.conclusion?.toLowerCase() ?? "";
     return ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(conclusion);
   });
+}
+
+function actionableReviewThreads(inspection: PullRequestInspection): PullRequestInspection["review_threads"] {
+  return (inspection.review_threads ?? []).filter((thread) => !thread.is_resolved && thread.comments.some((comment) => comment.body.trim().length > 0));
 }
 
 function latestReviewsByReviewer(reviews: PullRequestInspection["reviews"], states: string[]): PullRequestInspection["reviews"] {
@@ -1255,9 +1375,25 @@ function renderPullRequestFollowupContext(
       lines.push(`- ${review.reviewer} ${review.state}${review.submitted_at ? ` at ${review.submitted_at}` : ""}: ${singleLine(review.body ?? "Changes requested.")}`);
     }
   }
-  if (inspection.review_comments.length > 0) {
+  if ((inspection.issue_comments ?? []).length > 0) {
+    lines.push("", "PR conversation comments:");
+    for (const comment of (inspection.issue_comments ?? []).slice(0, 20)) {
+      lines.push(`- ${comment.author}${comment.updated_at ? ` at ${comment.updated_at}` : ""}: ${singleLine(comment.body)}${comment.url ? ` (${comment.url})` : ""}`);
+    }
+  }
+  const unresolvedThreads = actionableReviewThreads(inspection);
+  if (unresolvedThreads.length > 0) {
+    lines.push("", "Unresolved review threads:");
+    for (const thread of unresolvedThreads.slice(0, 20)) {
+      const location = [thread.path, thread.line ? `line ${thread.line}` : null].filter(Boolean).join(":");
+      const latest = thread.comments.at(-1);
+      lines.push(
+        `- ${location || "unknown location"}${thread.is_outdated ? " (outdated)" : ""}: ${latest ? `${latest.author}: ${singleLine(latest.body)}${latest.url ? ` (${latest.url})` : ""}` : "No comment text."}`
+      );
+    }
+  } else if ((inspection.review_comments ?? []).length > 0) {
     lines.push("", "Inline review comments:");
-    for (const comment of inspection.review_comments.slice(0, 20)) {
+    for (const comment of (inspection.review_comments ?? []).slice(0, 20)) {
       const location = [comment.path, comment.line ? `line ${comment.line}` : null].filter(Boolean).join(":");
       lines.push(`- ${location || "unknown location"} by ${comment.author}: ${singleLine(comment.body)}${comment.url ? ` (${comment.url})` : ""}`);
     }

@@ -161,6 +161,7 @@ function githubDisabled(): SymphonyConfig["github"] {
     base_branch: "main",
     branch_prefix: "symphony",
     pr_ready_file: "SYMPHONY_PR_READY.json",
+    evidence_file: "SYMPHONY_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };

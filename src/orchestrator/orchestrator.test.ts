@@ -7,6 +7,7 @@ import type {
   DurableStateSnapshot,
   DurableStateStore,
   PullRequestInspection,
+  PullRequestEvidencePublisher,
   PullRequestMerger,
   PullRequestPublisher,
   PullRequestTracker,
@@ -129,6 +130,73 @@ describe("orchestrator", () => {
     await tracker.transitionIssue(activeIssue, "In Progress");
     await orchestrator.tick();
     expect(published).toHaveLength(1);
+    await orchestrator.stop();
+  });
+
+  test("publishes worker evidence manifest back to the pull request", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-evidence-"));
+    const serverPath = path.join(root, "fake-codex-evidence.mjs");
+    await writeFile(serverPath, fakePrReadyWithEvidenceCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-evidence", identifier: "SAM-18", state: "Todo", title: "Publish evidence" });
+    const tracker = new LocalTracker([activeIssue]);
+    const publisher: PullRequestPublisher = {
+      async publish() {
+        return { number: 18, url: "https://github.test/acme/widgets/pull/18", branch: "symphony/sam-18-publish-evidence", title: "SAM-18: Publish evidence", created: true };
+      }
+    };
+    const evidencePublished: unknown[] = [];
+    const evidencePublisher: PullRequestEvidencePublisher = {
+      async publish(input) {
+        evidencePublished.push(input);
+        return { comment_id: 1818, url: "https://github.test/acme/widgets/pull/18#issuecomment-1818" };
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestEvidencePublisher: evidencePublisher,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => evidencePublished.length === 1, "pull request evidence publication");
+
+    expect(evidencePublished[0]).toMatchObject({
+      pullRequest: { number: 18 },
+      manifest: {
+        summary: "Verified with Playwright.",
+        verification: ["pnpm test", "npx playwright test"],
+        app_urls: ["http://127.0.0.1:3000"],
+        artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
+      }
+    });
+    expect(orchestrator.issueSnapshot("SAM-18")).toMatchObject({
+      tracked: {
+        github_evidence_comment_id: 1818,
+        github_evidence_comment_url: "https://github.test/acme/widgets/pull/18#issuecomment-1818"
+      }
+    });
     await orchestrator.stop();
   });
 
@@ -623,6 +691,66 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("requeues top-level PR comments and unresolved review threads", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-thread-comments-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-thread-comment", identifier: "SAM-19", state: "Todo", title: "Handle PR comments" });
+    const tracker = new LocalTracker([activeIssue]);
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return { number: 19, url: "https://github.test/acme/widgets/pull/19", branch: "symphony/sam-19-handle-pr-comments", title: "SAM-19: Handle PR comments", created: published.length === 1 };
+      }
+    };
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        return conversationAndThreadInspection();
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }} attempt={{ attempt }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => published.length === 1, "initial pull request publication");
+    await orchestrator.tick();
+    await waitFor(() => published.length === 2, "conversation and thread follow-up publication");
+
+    expect(tracker.comments.some((comment) => comment.body.includes("GitHub PR conversation comments need attention") && comment.body.includes("GitHub unresolved review threads need attention"))).toBe(true);
+    const promptLog = await readFile(path.join(manager.workspacePath("SAM-19"), "prompts.log"), "utf8");
+    expect(promptLog).toContain("PR conversation comments");
+    expect(promptLog).toContain("Please add a screenshot before review.");
+    expect(promptLog).toContain("Unresolved review threads");
+    expect(promptLog).toContain("src/widget.ts:line 88");
+    await orchestrator.stop();
+  });
+
   test("recovers open Symphony PRs after restart and suppresses duplicate dispatch", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-recover-"));
     const cfg = {
@@ -774,6 +902,37 @@ rl.on("line", (line) => {
 `;
 }
 
+function fakePrReadyWithEvidenceCodexServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+import { mkdirSync, writeFileSync } from "node:fs";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: {} });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" } } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
+    setTimeout(() => {
+      mkdirSync("artifacts/SAM-18", { recursive: true });
+      writeFileSync("artifacts/SAM-18/home.png", "fake image");
+      writeFileSync("SYMPHONY_PR_READY.json", JSON.stringify({ title: "SAM-18: Publish evidence", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
+      writeFileSync("SYMPHONY_EVIDENCE.json", JSON.stringify({
+        summary: "Verified with Playwright.",
+        verification: ["pnpm test", "npx playwright test"],
+        app_urls: ["http://127.0.0.1:3000"],
+        artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png", description: "Home page after change." }],
+        notes: "No known reviewer caveats."
+      }));
+      send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
+      send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+    }, 10);
+  }
+});
+`;
+}
+
 function failingInspection(): PullRequestInspection {
   return {
     number: 10,
@@ -859,6 +1018,80 @@ function commentOnlyInspection(): PullRequestInspection {
         updated_at: "2026-05-16T05:31:10.000Z",
         commit_id: "comment-head-sha",
         original_commit_id: "comment-head-sha"
+      }
+    ]
+  };
+}
+
+function conversationAndThreadInspection(): PullRequestInspection {
+  return {
+    number: 19,
+    url: "https://github.test/acme/widgets/pull/19",
+    branch: "symphony/sam-19-handle-pr-comments",
+    title: "SAM-19: Handle PR comments",
+    state: "open",
+    checks_status: "success",
+    review_status: "approved",
+    head_sha: "conversation-head-sha",
+    mergeable_state: "clean",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: "PR #19 is open; checks=success; review=approved at conversation-head-sha.",
+    checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/19" }],
+    reviews: [
+      {
+        reviewer: "reviewer",
+        state: "APPROVED",
+        submitted_at: "2026-05-16T06:20:00.000Z",
+        body: "Looks good after evidence is attached.",
+        url: "https://github.test/review/19",
+        commit_id: "conversation-head-sha"
+      }
+    ],
+    review_comments: [],
+    issue_comments: [
+      {
+        author: "reviewer",
+        body: "Please add a screenshot before review.",
+        url: "https://github.test/pr-comment/19",
+        created_at: "2026-05-16T06:21:00.000Z",
+        updated_at: "2026-05-16T06:21:00.000Z"
+      }
+    ],
+    review_threads: [
+      {
+        id: "thread-19-open",
+        is_resolved: false,
+        is_outdated: false,
+        path: "src/widget.ts",
+        line: 88,
+        comments: [
+          {
+            author: "reviewer",
+            body: "This edge case still needs coverage.",
+            url: "https://github.test/thread/19",
+            created_at: "2026-05-16T06:22:00.000Z",
+            updated_at: "2026-05-16T06:22:00.000Z",
+            commit_id: "conversation-head-sha"
+          }
+        ]
+      },
+      {
+        id: "thread-19-resolved",
+        is_resolved: true,
+        is_outdated: false,
+        path: "src/old.ts",
+        line: 12,
+        comments: [
+          {
+            author: "reviewer",
+            body: "Resolved feedback should not be actionable.",
+            url: "https://github.test/thread/resolved",
+            created_at: "2026-05-16T06:22:30.000Z",
+            updated_at: "2026-05-16T06:22:30.000Z",
+            commit_id: "conversation-head-sha"
+          }
+        ]
       }
     ]
   };
@@ -966,6 +1199,7 @@ function githubDisabled(): SymphonyConfig["github"] {
     base_branch: "main",
     branch_prefix: "symphony",
     pr_ready_file: "SYMPHONY_PR_READY.json",
+    evidence_file: "SYMPHONY_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };

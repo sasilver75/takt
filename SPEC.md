@@ -2098,10 +2098,14 @@ Use the same validation profiles as Section 17:
   app-server session using configured Symphony auth.
 - Durable state extension persists retry queue, issue history, PR metadata, and session summaries
   across process restarts. Live worker processes are not required to survive restart.
-- GitHub PR lifecycle extension owns orchestrator-side PR publishing/reconciliation and MAY merge
-  PRs only under an implementation-defined, documented policy. A safe merge policy SHOULD require
-  the inspected head SHA, successful checks, approving review, non-draft PR state, and clean
-  mergeability unless explicitly relaxed by workflow config.
+- GitHub PR lifecycle extension owns orchestrator-side PR publishing/reconciliation, including
+  top-level PR conversation comments, submitted reviews, inline comments, unresolved review
+  threads, and check results as worker follow-up inputs.
+- Worker evidence extension lets workers write an implementation-defined evidence manifest that the
+  orchestrator publishes back to the PR without exposing GitHub credentials to workers.
+- GitHub PR lifecycle extension MAY merge PRs only under an implementation-defined, documented
+  policy. A safe merge policy SHOULD require the inspected head SHA, successful checks, approving
+  review, non-draft PR state, and clean mergeability unless explicitly relaxed by workflow config.
 - TODO: Make observability settings configurable in workflow front matter without prescribing UI
   implementation details.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead

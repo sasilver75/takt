@@ -7,8 +7,41 @@ import { classifyCheckRuns, classifyReviews, GitHubPullRequestTracker, inferIssu
 describe("GitHub PR tracker", () => {
   test("classifies failing checks and requested changes with review context", async () => {
     const requests: string[] = [];
-    const fetchImpl: typeof fetch = async (url) => {
-      requests.push(String(url));
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push(`${String(init?.method ?? "GET")} ${String(url)}`);
+      if (String(url).endsWith("/graphql")) {
+        return jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "thread-1",
+                      isResolved: false,
+                      isOutdated: false,
+                      path: "src/widget.ts",
+                      line: 12,
+                      comments: {
+                        nodes: [
+                          {
+                            author: { login: "reviewer" },
+                            body: "This branch misses the null case.",
+                            url: "https://github.test/thread/1",
+                            createdAt: "2026-05-15T12:03:00Z",
+                            updatedAt: "2026-05-15T12:03:00Z",
+                            commit: { oid: "abc123def456" }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        });
+      }
       if (String(url).endsWith("/pulls/7")) {
         return jsonResponse({
           number: 7,
@@ -54,6 +87,24 @@ describe("GitHub PR tracker", () => {
           }
         ]);
       }
+      if (String(url).endsWith("/issues/7/comments?per_page=100")) {
+        return jsonResponse([
+          {
+            user: { login: "reviewer" },
+            body: "Please include reviewer evidence.",
+            html_url: "https://github.test/pr-comment/1",
+            created_at: "2026-05-15T12:02:00Z",
+            updated_at: "2026-05-15T12:02:00Z"
+          },
+          {
+            user: { login: "symphony" },
+            body: "<!-- symphony:evidence -->\n## Symphony Worker Evidence",
+            html_url: "https://github.test/pr-comment/evidence",
+            created_at: "2026-05-15T12:02:30Z",
+            updated_at: "2026-05-15T12:02:30Z"
+          }
+        ]);
+      }
       return jsonResponse({ message: "not found" }, 404);
     };
     const tracker = new GitHubPullRequestTracker(() => config("/tmp/symphony-gh-tracker"), createLogger(() => undefined), fetchImpl);
@@ -66,7 +117,7 @@ describe("GitHub PR tracker", () => {
       created: true
     });
 
-    expect(requests).toHaveLength(5);
+    expect(requests).toHaveLength(7);
     expect(inspection).toMatchObject({
       number: 7,
       state: "open",
@@ -74,7 +125,9 @@ describe("GitHub PR tracker", () => {
       review_status: "changes_requested",
       head_sha: "abc123def456",
       reviews: [{ reviewer: "reviewer", state: "CHANGES_REQUESTED" }],
-      review_comments: [{ path: "src/widget.ts", line: 12 }]
+      review_comments: [{ path: "src/widget.ts", line: 12 }],
+      issue_comments: [{ author: "reviewer", body: "Please include reviewer evidence." }],
+      review_threads: [{ id: "thread-1", is_resolved: false, path: "src/widget.ts", line: 12 }]
     });
     expect(inspection.checks).toEqual(expect.arrayContaining([expect.objectContaining({ name: "verify", conclusion: "failure" })]));
     expect(inspection.checks).toEqual(expect.arrayContaining([expect.objectContaining({ name: "legacy-ci", conclusion: "success" })]));
@@ -159,6 +212,7 @@ function config(root: string): SymphonyConfig {
       base_branch: "main",
       branch_prefix: "symphony",
       pr_ready_file: "SYMPHONY_PR_READY.json",
+      evidence_file: "SYMPHONY_EVIDENCE.json",
       draft: false,
       merge: {
         enabled: false,

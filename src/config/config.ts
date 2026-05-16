@@ -52,6 +52,7 @@ export function resolveConfig(
       base_branch: stringAt(github, "base_branch") ?? "main",
       branch_prefix: stringAt(github, "branch_prefix") ?? "symphony",
       pr_ready_file: stringAt(github, "pr_ready_file") ?? "SYMPHONY_PR_READY.json",
+      evidence_file: stringAt(github, "evidence_file") ?? "SYMPHONY_EVIDENCE.json",
       draft: booleanAt(github, "draft", false),
       merge: {
         enabled: booleanAt(githubMerge, "enabled", false),
@@ -127,6 +128,9 @@ export function validateDispatchConfig(config: SymphonyConfig): void {
     if (!config.github.base_branch.trim()) throw new SymphonyError("invalid_config_value", "github.base_branch must be non-empty");
     if (!config.github.pr_ready_file.trim() || config.github.pr_ready_file.includes("/") || config.github.pr_ready_file.includes("\\")) {
       throw new SymphonyError("invalid_config_value", "github.pr_ready_file must be a workspace-root file name");
+    }
+    if (!config.github.evidence_file.trim() || config.github.evidence_file.includes("/") || config.github.evidence_file.includes("\\")) {
+      throw new SymphonyError("invalid_config_value", "github.evidence_file must be a workspace-root file name");
     }
   }
 }

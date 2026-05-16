@@ -52,7 +52,7 @@ describe("workflow loader and config", () => {
     expect(config.tracker.api_key).toBe("secret");
     expect(config.tracker.claim_state).toBe("In Progress");
     expect(config.tracker.review_state).toBe("Needs Human");
-    expect(config.github).toMatchObject({ enabled: true, owner: "acme", repo: "widgets", token: "github-secret" });
+    expect(config.github).toMatchObject({ enabled: true, owner: "acme", repo: "widgets", token: "github-secret", evidence_file: "SYMPHONY_EVIDENCE.json" });
     expect(config.github.merge).toMatchObject({
       enabled: true,
       method: "rebase",

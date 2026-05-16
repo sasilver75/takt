@@ -1,0 +1,162 @@
+import path from "node:path";
+import { describe, expect, test } from "vitest";
+import type { SymphonyConfig } from "../domain.js";
+import { createLogger } from "../observability/logger.js";
+import { GitHubPullRequestEvidencePublisher, renderEvidenceComment, SYMPHONY_EVIDENCE_COMMENT_MARKER } from "./evidence.js";
+
+describe("GitHub PR evidence publisher", () => {
+  test("creates a sticky PR evidence comment with reviewer artifacts", async () => {
+    const requests: Array<{ method: string; url: string; body: unknown }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push({ method: String(init?.method ?? "GET"), url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (String(init?.method ?? "GET") === "GET") return jsonResponse([]);
+      return jsonResponse({ id: 123, html_url: "https://github.test/acme/widgets/pull/9#issuecomment-123" });
+    };
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+
+    await expect(
+      publisher.publish({
+        pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9", title: "SAM-9", created: true },
+        workspacePath: "/tmp/workspace",
+        manifest: {
+          summary: "Verified the app flow.",
+          verification: ["pnpm test", "npx playwright test"],
+          app_urls: ["http://127.0.0.1:3000"],
+          artifacts: [
+            { kind: "screenshot", path: "/workspace/artifacts/SAM-9/home.png", description: "Homepage after change." },
+            { kind: "trace", url: "https://artifact.test/trace.zip" }
+          ],
+          notes: "No known reviewer caveats."
+        }
+      })
+    ).resolves.toEqual({ comment_id: 123, url: "https://github.test/acme/widgets/pull/9#issuecomment-123" });
+
+    expect(requests.map((request) => request.method)).toEqual(["GET", "POST"]);
+    expect(requests[1]?.url).toBe("https://api.github.test/repos/acme/widgets/issues/9/comments");
+    expect(requests[1]?.body).toMatchObject({
+      body: expect.stringContaining(SYMPHONY_EVIDENCE_COMMENT_MARKER)
+    });
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("artifacts/SAM-9/home.png");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("npx playwright test");
+  });
+
+  test("updates an existing evidence comment when the marker is present", async () => {
+    const requests: Array<{ method: string; url: string; body: unknown }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push({ method: String(init?.method ?? "GET"), url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (String(init?.method ?? "GET") === "GET") {
+        return jsonResponse([{ id: 456, body: `${SYMPHONY_EVIDENCE_COMMENT_MARKER}\nold`, html_url: "https://github.test/comment/456" }]);
+      }
+      return jsonResponse({ id: 456, html_url: "https://github.test/comment/456" });
+    };
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+
+    await publisher.publish({
+      pullRequest: { number: 10, url: "https://github.test/acme/widgets/pull/10", branch: "symphony/sam-10", title: "SAM-10", created: false },
+      workspacePath: "/tmp/workspace",
+      manifest: { summary: "Updated evidence." }
+    });
+
+    expect(requests.map((request) => request.method)).toEqual(["GET", "PATCH"]);
+    expect(requests[1]?.url).toBe("https://api.github.test/repos/acme/widgets/issues/comments/456");
+  });
+
+  test("recovers when the stored evidence comment id was deleted", async () => {
+    const requests: Array<{ method: string; url: string; body: unknown }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push({ method: String(init?.method ?? "GET"), url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (String(url).endsWith("/issues/comments/456")) return jsonResponse({ message: "Not Found" }, 404);
+      if (String(init?.method ?? "GET") === "GET") return jsonResponse([]);
+      return jsonResponse({ id: 789, html_url: "https://github.test/comment/789" });
+    };
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+
+    await expect(
+      publisher.publish({
+        pullRequest: { number: 11, url: "https://github.test/acme/widgets/pull/11", branch: "symphony/sam-11", title: "SAM-11", created: false },
+        workspacePath: "/tmp/workspace",
+        manifest: { summary: "Fresh evidence." },
+        previousCommentId: 456
+      })
+    ).resolves.toEqual({ comment_id: 789, url: "https://github.test/comment/789" });
+
+    expect(requests.map((request) => request.method)).toEqual(["PATCH", "GET", "POST"]);
+    expect(requests[2]?.url).toBe("https://api.github.test/repos/acme/widgets/issues/11/comments");
+  });
+
+  test("renders evidence comments deterministically", () => {
+    const body = renderEvidenceComment(
+      { number: 1, url: "https://github.test/acme/widgets/pull/1", branch: "symphony/sam-1", title: "SAM-1", created: true },
+      {
+        summary: "Done",
+        artifacts: [
+          { path: "artifacts/../artifacts/SAM-1/report.txt", label: "report" },
+          { path: "/var/tmp/outside.txt", label: "outside" }
+        ]
+      },
+      "/tmp/workspace"
+    );
+    expect(body).toContain(SYMPHONY_EVIDENCE_COMMENT_MARKER);
+    expect(body).toContain("`artifacts/SAM-1/report.txt`");
+    expect(body).not.toContain("outside");
+  });
+});
+
+function config(root: string): SymphonyConfig {
+  return {
+    workflowPath: path.join(root, "WORKFLOW.md"),
+    workflowDir: root,
+    tracker: {
+      kind: "linear",
+      endpoint: "https://api.linear.app/graphql",
+      api_key: "linear-secret",
+      project_slug: "demo",
+      active_states: ["Ready", "In Progress"],
+      terminal_states: ["Done"],
+      claim_state: "In Progress",
+      review_state: "Needs Human"
+    },
+    github: {
+      enabled: true,
+      owner: "acme",
+      repo: "widgets",
+      api_endpoint: "https://api.github.test",
+      token: "github-secret-token",
+      remote: "origin",
+      base_branch: "main",
+      branch_prefix: "symphony",
+      pr_ready_file: "SYMPHONY_PR_READY.json",
+      evidence_file: "SYMPHONY_EVIDENCE.json",
+      draft: false,
+      merge: {
+        enabled: false,
+        method: "squash",
+        require_approval: true,
+        require_successful_checks: true,
+        require_clean_merge: true,
+        delete_branch: true,
+        complete_state: null
+      }
+    },
+    polling: { interval_ms: 1000 },
+    workspace: { root: path.join(root, "workspaces") },
+    runtime: { kind: "host" },
+    hooks: { after_create: null, before_run: null, after_run: null, before_remove: null, timeout_ms: 1000 },
+    agent: { max_concurrent_agents: 1, max_turns: 1, max_retry_backoff_ms: 1000, max_concurrent_agents_by_state: {} },
+    codex: {
+      command: "codex app-server",
+      approval_policy: null,
+      thread_sandbox: null,
+      turn_sandbox_policy: null,
+      turn_timeout_ms: 1000,
+      read_timeout_ms: 1000,
+      stall_timeout_ms: 0,
+      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+    },
+    server: { port: null, host: "127.0.0.1" }
+  };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}

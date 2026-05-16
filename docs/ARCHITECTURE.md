@@ -13,7 +13,9 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - PR publishing: `src/github/publisher.ts`
   - Pushes committed worker branches and creates or updates GitHub pull requests with orchestrator-held credentials after a worker writes the configured PR-ready manifest.
 - PR lifecycle tracking: `src/github/tracker.ts`
-  - Discovers open Symphony PRs by branch prefix after restart, then inspects PRs, head check runs, reviews, and inline review comments so the orchestrator can decide whether to wait for humans, requeue worker follow-up, or record terminal PR state.
+  - Discovers open Symphony PRs by branch prefix after restart, then inspects PRs, head check runs, top-level PR conversation comments, reviews, inline review comments, and unresolved review threads so the orchestrator can decide whether to wait for humans, requeue worker follow-up, or record terminal PR state.
+- PR evidence publishing: `src/github/evidence.ts`
+  - Reads worker evidence manifests after PR publication and creates or updates a sticky PR comment with verification commands, app URLs, and artifact pointers.
 - PR merging: `src/github/merger.ts`
   - Optionally merges approved, passing, clean PRs using orchestrator-held GitHub credentials and the inspected head SHA, then deletes the worker branch and moves the tracker issue to the configured completion state.
 - Workspace execution boundary: `src/workspace/manager.ts`
@@ -38,7 +40,7 @@ Symphony is split into layers that mirror `SPEC.md` and keep the service legible
 - Workspace paths must remain below the configured workspace root.
 - The Symphony Linear MCP server is hosted by the orchestrator. Host workers receive a loopback URL; Docker workers receive a `host.docker.internal` URL plus a per-run bearer-token env-var reference. Linear auth stays inside the orchestrator-owned tracker adapter.
 - Tracker secrets are removed from the Codex app-server environment and redacted from Symphony logs and status events. Workers are instructed to treat `.symphony` as orchestrator-owned wiring rather than task context.
-- GitHub publishing, discovery, inspection, and optional merging credentials stay in the orchestrator. Workers produce commits plus a PR-ready manifest; Symphony owns branch push, PR creation/update, PR status/review inspection, Linear PR comments, review/completion-state transitions, restart recovery for open Symphony PRs, follow-up requeue decisions, and configured PR merges.
+- GitHub publishing, discovery, inspection, evidence comments, and optional merging credentials stay in the orchestrator. Workers produce commits plus PR-ready/evidence manifests; Symphony owns branch push, PR creation/update, PR status/review/comment/thread inspection, PR evidence publication, Linear PR comments, review/completion-state transitions, restart recovery for open Symphony PRs, follow-up requeue decisions, and configured PR merges.
 - Durable state stores scheduler metadata only: retry queue, completed issue IDs, issue history, recent events, token totals, and PR metadata. It must not contain raw Linear/GitHub secrets or Codex auth material.
 - Docker workers mount only the per-issue workspace and an ephemeral per-run Codex home containing auth material copied from the configured source. Operator plugin caches, app approvals, rollout state, shell history, `keys.txt`, and the repo root are not mounted or copied into the image/build context.
 - Issue identifiers are sanitized before they become directory names.

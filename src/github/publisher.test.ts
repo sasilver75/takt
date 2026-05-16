@@ -35,6 +35,7 @@ describe("GitHub PR publisher", () => {
     await git(workspace, "add", "feature.txt");
     await git(workspace, "commit", "-m", "Add feature");
     await writeFile(path.join(workspace, "SYMPHONY_PR_READY.json"), "{}\n");
+    await writeFile(path.join(workspace, "SYMPHONY_EVIDENCE.json"), "{}\n");
 
     const requests: Array<{ method: string; url: string; body: unknown }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {
@@ -160,6 +161,7 @@ function config(root: string, remote: string): SymphonyConfig {
       base_branch: "main",
       branch_prefix: "symphony",
       pr_ready_file: "SYMPHONY_PR_READY.json",
+      evidence_file: "SYMPHONY_EVIDENCE.json",
       draft: false,
       merge: {
         enabled: false,

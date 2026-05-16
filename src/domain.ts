@@ -49,6 +49,7 @@ export type SymphonyConfig = {
     base_branch: string;
     branch_prefix: string;
     pr_ready_file: string;
+    evidence_file: string;
     draft: boolean;
     merge: GitHubMergeConfig;
   };
@@ -192,6 +193,22 @@ export type PrReadyManifest = {
   risk?: string;
 };
 
+export type EvidenceArtifact = {
+  path?: string;
+  url?: string;
+  kind?: string;
+  label?: string;
+  description?: string;
+};
+
+export type EvidenceManifest = {
+  summary?: string;
+  verification?: string[];
+  app_urls?: string[];
+  artifacts?: EvidenceArtifact[];
+  notes?: string;
+};
+
 export type PublishedPullRequest = {
   number: number;
   url: string;
@@ -240,6 +257,32 @@ export type PullRequestReviewCommentSummary = {
   original_commit_id?: string | null;
 };
 
+export type PullRequestIssueCommentSummary = {
+  author: string;
+  body: string;
+  url: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type PullRequestReviewThreadCommentSummary = {
+  author: string;
+  body: string;
+  url: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  commit_id?: string | null;
+};
+
+export type PullRequestReviewThreadSummary = {
+  id: string;
+  is_resolved: boolean;
+  is_outdated: boolean;
+  path: string | null;
+  line: number | null;
+  comments: PullRequestReviewThreadCommentSummary[];
+};
+
 export type PullRequestInspection = {
   number: number;
   url: string;
@@ -256,6 +299,8 @@ export type PullRequestInspection = {
   checks: PullRequestCheckSummary[];
   reviews: PullRequestReviewSummary[];
   review_comments: PullRequestReviewCommentSummary[];
+  issue_comments: PullRequestIssueCommentSummary[];
+  review_threads: PullRequestReviewThreadSummary[];
 };
 
 export type PullRequestTracker = {
@@ -273,6 +318,20 @@ export type PullRequestMergeResult = {
 
 export type PullRequestMerger = {
   merge(input: { pullRequest: PublishedPullRequest; inspection: PullRequestInspection }): Promise<PullRequestMergeResult>;
+};
+
+export type PullRequestEvidencePublication = {
+  comment_id: number;
+  url: string | null;
+};
+
+export type PullRequestEvidencePublisher = {
+  publish(input: {
+    pullRequest: PublishedPullRequest;
+    workspacePath: string;
+    manifest: EvidenceManifest;
+    previousCommentId?: number | null;
+  }): Promise<PullRequestEvidencePublication>;
 };
 
 export type RunningEntry = {

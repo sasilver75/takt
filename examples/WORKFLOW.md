@@ -25,6 +25,7 @@ github:
   base_branch: main
   branch_prefix: symphony
   pr_ready_file: SYMPHONY_PR_READY.json
+  evidence_file: SYMPHONY_EVIDENCE.json
   draft: false
   merge:
     enabled: false
@@ -98,9 +99,26 @@ When the implementation is ready for PR review, write `SYMPHONY_PR_READY.json` i
 }
 ```
 
-Do not create the GitHub PR yourself and do not move the Linear issue to review. Symphony will push the branch, create or update the PR, comment the PR link in Linear, and move the issue to `Needs Human`.
+If you ran the application, used Playwright, captured screenshots/traces/logs, or produced other reviewer evidence, write `SYMPHONY_EVIDENCE.json` in the workspace root:
 
-If this run is a PR follow-up, Symphony will append an orchestrator follow-up context section after this prompt with failing checks, review summaries, or inline review comments. Treat that section as the current task brief and update the existing branch/PR rather than starting a new issue branch.
+```json
+{
+  "summary": "What was verified from the running app.",
+  "verification": ["pnpm test", "pnpm build", "npx playwright test"],
+  "app_urls": ["http://127.0.0.1:3000"],
+  "artifacts": [
+    { "kind": "screenshot", "path": "artifacts/SAM-123/homepage.png", "description": "Homepage after the change." },
+    { "kind": "trace", "path": "artifacts/SAM-123/playwright-trace.zip" }
+  ],
+  "notes": "Reviewer caveats or Notable none."
+}
+```
+
+Commit all durable artifact files listed by path. Do not commit transient server logs unless they are intentionally useful evidence.
+
+Do not create the GitHub PR yourself and do not move the Linear issue to review. Symphony will push the branch, create or update the PR, publish evidence as a PR comment, comment the PR link in Linear, and move the issue to `Needs Human`.
+
+If this run is a PR follow-up, Symphony will append an orchestrator follow-up context section after this prompt with failing checks, PR conversation comments, review summaries, unresolved review threads, or inline review comments. Treat that section as the current task brief and update the existing branch/PR rather than starting a new issue branch.
 
 Safety requirements:
 

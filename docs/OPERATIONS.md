@@ -54,17 +54,18 @@ When `github.enabled: true`, the issue-to-PR loop is:
 
 1. Symphony moves the issue to `tracker.claim_state` before launching the worker.
 2. The worker implements, verifies, commits, and writes `github.pr_ready_file` in the workspace root.
-3. Symphony pushes a branch named from `github.branch_prefix` and the issue identifier/title.
-4. Symphony creates or updates a GitHub PR against `github.base_branch`.
-5. Symphony comments the PR URL in Linear and moves the issue to `tracker.review_state`.
+3. If useful, the worker writes `github.evidence_file` with reviewer evidence such as app URLs, verification commands, screenshots, traces, logs, or reports. Durable artifact files listed by path should be committed with the worker changes.
+4. Symphony pushes a branch named from `github.branch_prefix` and the issue identifier/title.
+5. Symphony creates or updates a GitHub PR against `github.base_branch`.
+6. Symphony publishes evidence as a sticky PR conversation comment, comments the PR URL in Linear, and moves the issue to `tracker.review_state`.
 
 After a PR is published, Symphony owns the PR lifecycle reconciliation loop:
 
 - On every poll, Symphony discovers open PRs whose head branch starts with `github.branch_prefix`, infers the Linear issue identifier from the PR title/body/branch, and reconnects them to tracker issues. This lets a restarted orchestrator resume monitoring already-open Symphony PRs without a durable database.
-- It inspects the GitHub PR, latest head checks, reviews, and inline review comments on each poll tick.
+- It inspects the GitHub PR, latest head checks, top-level PR conversation comments, reviews, inline review comments, and unresolved review threads on each poll tick.
 - Pending checks, passing checks, and review-required states stay in the human-review lane.
 - Merged or closed PRs are recorded as terminal PR states in the issue debug record.
-- Failing checks or requested changes move the Linear issue back to `tracker.claim_state`, comment a concise follow-up brief in Linear, and launch or queue another worker attempt. The worker receives that same brief in its first-turn prompt, including failing check names, review summaries, and inline comment excerpts.
+- Failing checks, top-level PR comments, requested changes, unresolved review threads, or inline comments move the Linear issue back to `tracker.claim_state`, comment a concise follow-up brief in Linear, and launch or queue another worker attempt. The worker receives that same brief in its first-turn prompt, including failing check names, PR conversation comments, review summaries, unresolved thread excerpts, and inline comment excerpts.
 - Workers still do not receive `GITHUB_TOKEN`; they update the existing branch by committing in the issue workspace and refreshing `github.pr_ready_file`. Symphony republishes the PR from the orchestrator side.
 - If `github.merge.enabled: true`, Symphony can merge PRs after reconciliation reports an open non-draft PR satisfying the configured policy. The default policy requires `checks_status=success`, `review_status=approved`, and `mergeable_state=clean`; the merge call is pinned to the inspected head SHA. When `github.merge.complete_state` is set, Symphony moves the Linear issue to that state after a successful merge.
 

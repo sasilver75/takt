@@ -27,7 +27,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     if (!config.owner || !config.repo || !config.token) throw new SymphonyError("github_not_configured", "GitHub publishing is not fully configured");
 
     const branch = branchName(config.branch_prefix, input.issue);
-    await ensureCleanWorkspace(input.workspacePath, config.pr_ready_file);
+    await ensureCleanWorkspace(input.workspacePath, [config.pr_ready_file, config.evidence_file]);
     await git(input.workspacePath, ["fetch", config.remote, config.base_branch]);
     const baseRef = `FETCH_HEAD`;
     const ahead = Number(await gitOut(input.workspacePath, ["rev-list", "--count", `${baseRef}..HEAD`]));
@@ -128,13 +128,14 @@ export function branchName(prefix: string, issue: Issue): string {
   return `${prefix.replace(/\/+$/g, "")}/${slug || issue.identifier.toLowerCase()}`;
 }
 
-async function ensureCleanWorkspace(workspacePath: string, prReadyFile: string): Promise<void> {
+async function ensureCleanWorkspace(workspacePath: string, ignoredRootFiles: string[]): Promise<void> {
+  const ignored = new Set(ignoredRootFiles);
   const status = await gitOut(workspacePath, ["status", "--porcelain"]);
   const dirty = status
     .split("\n")
     .map((line) => line.trimEnd())
     .filter(Boolean)
-    .filter((line) => line.slice(3) !== prReadyFile);
+    .filter((line) => !ignored.has(line.slice(3)));
   if (dirty.length > 0) throw new SymphonyError("github_dirty_workspace", "Workspace has uncommitted changes; worker must commit before PR publishing");
 }
 

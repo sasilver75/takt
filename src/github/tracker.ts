@@ -4,15 +4,18 @@ import type {
   PullRequestCheckSummary,
   PullRequestChecksStatus,
   PullRequestInspection,
+  PullRequestIssueCommentSummary,
   PullRequestReviewCommentSummary,
   PullRequestReviewSummary,
   PullRequestReviewStatus,
+  PullRequestReviewThreadSummary,
   PullRequestTracker,
   SymphonyConfig
 } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import { GitHubApiClient, type FetchLike } from "./client.js";
+import { SYMPHONY_EVIDENCE_COMMENT_MARKER } from "./evidence.js";
 
 export class GitHubPullRequestTracker implements PullRequestTracker {
   private readonly api: GitHubApiClient;
@@ -37,6 +40,8 @@ export class GitHubPullRequestTracker implements PullRequestTracker {
     const checks = headSha ? await this.inspectChecks(headSha) : [];
     const reviews = state === "open" ? await this.inspectReviews(input.number) : [];
     const reviewComments = state === "open" ? await this.inspectReviewComments(input.number) : [];
+    const issueComments = state === "open" ? await this.inspectIssueComments(input.number) : [];
+    const reviewThreads = state === "open" ? await this.inspectReviewThreads(input.number) : [];
     const checksStatus = classifyCheckRuns(checks);
     const reviewStatus = state === "open" ? classifyReviews(reviews) : "unknown";
     const inspection: PullRequestInspection = {
@@ -54,7 +59,9 @@ export class GitHubPullRequestTracker implements PullRequestTracker {
       summary: summarizeInspection(number, state, checksStatus, reviewStatus, headSha),
       checks,
       reviews,
-      review_comments: reviewComments
+      review_comments: reviewComments,
+      issue_comments: issueComments,
+      review_threads: reviewThreads
     };
     this.logger.info("github pr inspected", {
       pr_number: inspection.number,
@@ -127,7 +134,57 @@ export class GitHubPullRequestTracker implements PullRequestTracker {
     const comments = await this.api.request<unknown[]>("GET", `/repos/${config.owner}/${config.repo}/pulls/${number}/comments?per_page=100`);
     return (Array.isArray(comments) ? comments : []).map(readReviewCommentSummary).filter((comment): comment is PullRequestReviewCommentSummary => Boolean(comment));
   }
+
+  private async inspectIssueComments(number: number): Promise<PullRequestIssueCommentSummary[]> {
+    const config = this.getConfig().github;
+    const comments = await this.api.request<unknown[]>("GET", `/repos/${config.owner}/${config.repo}/issues/${number}/comments?per_page=100`);
+    return (Array.isArray(comments) ? comments : []).map(readIssueCommentSummary).filter((comment): comment is PullRequestIssueCommentSummary => Boolean(comment));
+  }
+
+  private async inspectReviewThreads(number: number): Promise<PullRequestReviewThreadSummary[]> {
+    const config = this.getConfig().github;
+    try {
+      const payload = await this.api.graphql<Record<string, unknown>>(REVIEW_THREADS_QUERY, {
+        owner: config.owner,
+        repo: config.repo,
+        number
+      });
+      const nodes = readNestedArray(payload, ["data", "repository", "pullRequest", "reviewThreads", "nodes"]);
+      return nodes.map(readReviewThreadSummary).filter((thread): thread is PullRequestReviewThreadSummary => Boolean(thread));
+    } catch (error) {
+      this.logger.warn("github pr review thread inspection failed", { pr_number: number, error: error instanceof Error ? error.message : String(error) });
+      return [];
+    }
+  }
 }
+
+const REVIEW_THREADS_QUERY = `
+query SymphonyPullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first: 50) {
+            nodes {
+              author { login }
+              body
+              url
+              createdAt
+              updatedAt
+              commit { oid }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
 
 export function classifyCheckRuns(runs: PullRequestCheckSummary[]): PullRequestChecksStatus {
   if (runs.length === 0) return "unknown";
@@ -191,6 +248,51 @@ function readReviewCommentSummary(value: unknown): PullRequestReviewCommentSumma
   };
 }
 
+function readIssueCommentSummary(value: unknown): PullRequestIssueCommentSummary | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const body = readString(record.body);
+  if (!body || isSymphonyEvidenceComment(body)) return null;
+  return {
+    author: readNestedString(record, ["user", "login"]) ?? "unknown",
+    body,
+    url: readString(record.html_url),
+    created_at: readString(record.created_at),
+    updated_at: readString(record.updated_at)
+  };
+}
+
+function readReviewThreadSummary(value: unknown): PullRequestReviewThreadSummary | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const id = readString(record.id);
+  if (!id) return null;
+  const comments = readNestedArray(record, ["comments", "nodes"]).map(readReviewThreadCommentSummary).filter((comment): comment is NonNullable<typeof comment> => Boolean(comment));
+  return {
+    id,
+    is_resolved: readBoolean(record.isResolved) ?? false,
+    is_outdated: readBoolean(record.isOutdated) ?? false,
+    path: readString(record.path),
+    line: readNumberOrNull(record.line),
+    comments
+  };
+}
+
+function readReviewThreadCommentSummary(value: unknown): PullRequestReviewThreadSummary["comments"][number] | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const body = readString(record.body);
+  if (!body) return null;
+  return {
+    author: readNestedString(record, ["author", "login"]) ?? "unknown",
+    body,
+    url: readString(record.url),
+    created_at: readString(record.createdAt),
+    updated_at: readString(record.updatedAt),
+    commit_id: readNestedString(record, ["commit", "oid"])
+  };
+}
+
 function readCommitStatusSummary(status: Record<string, unknown>): PullRequestCheckSummary {
   const state = readString(status.state)?.toLowerCase() ?? "unknown";
   const completed = state === "pending" ? "pending" : "completed";
@@ -250,6 +352,15 @@ function readBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
+function readNestedArray(record: Record<string, unknown>, path: string[]): unknown[] {
+  let current: unknown = record;
+  for (const key of path) {
+    if (!current || typeof current !== "object") return [];
+    current = (current as Record<string, unknown>)[key];
+  }
+  return Array.isArray(current) ? current : [];
+}
+
 function readNestedString(record: Record<string, unknown>, path: string[]): string | null {
   let current: unknown = record;
   for (const key of path) {
@@ -257,4 +368,8 @@ function readNestedString(record: Record<string, unknown>, path: string[]): stri
     current = (current as Record<string, unknown>)[key];
   }
   return readString(current);
+}
+
+function isSymphonyEvidenceComment(body: string): boolean {
+  return body.includes(SYMPHONY_EVIDENCE_COMMENT_MARKER);
 }
