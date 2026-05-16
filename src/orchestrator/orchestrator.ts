@@ -375,10 +375,12 @@ export class Orchestrator {
   }
 
   private async reconcilePullRequests(): Promise<void> {
-    if (!this.options.getConfig().github.enabled || !this.options.pullRequestTracker) return;
+    const config = this.options.getConfig();
+    if (!config.github.enabled || !this.options.pullRequestTracker) return;
     for (const record of this.state.issue_history.values()) {
       const pullRequest = readTrackedPullRequest(record.tracked.github_pull_request);
       if (!pullRequest) continue;
+      if (!isManagedPullRequestBranch(pullRequest, config)) continue;
       if (this.state.running.has(record.issue_id) || this.state.retry_attempts.has(record.issue_id)) continue;
       let inspection: PullRequestInspection;
       try {
@@ -1274,6 +1276,11 @@ function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledK
 
 function readHandledPullRequestFollowupKeys(record: IssueDebugRecord): Set<string> {
   return new Set(readStringArray(record.tracked.github_pr_handled_followup_keys));
+}
+
+function isManagedPullRequestBranch(pullRequest: PublishedPullRequest, config: SymphonyConfig): boolean {
+  const branchPrefix = `${config.github.branch_prefix.replace(/\/+$/g, "")}/`;
+  return pullRequest.branch.startsWith(branchPrefix);
 }
 
 function readStringArray(value: unknown): string[] {

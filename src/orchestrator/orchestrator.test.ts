@@ -869,6 +869,62 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("ignores restored PR tracking outside the current branch prefix", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-prefix-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token",
+        branch_prefix: "symphony-test"
+      }
+    };
+    const tracker = new LocalTracker([issue({ id: "i-pr-prefix", identifier: "SAM-21", state: "Needs Human", title: "Old managed PR" })]);
+    let inspected = 0;
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        inspected += 1;
+        return healthyInspection();
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+    orchestrator.state.completed.add("i-pr-prefix");
+    orchestrator.state.issue_history.set("SAM-21", {
+      issue_id: "i-pr-prefix",
+      issue_identifier: "SAM-21",
+      workspace_path: null,
+      restart_count: 0,
+      last_error: null,
+      recent_events: [],
+      tracked: {
+        github_pull_request: {
+          number: 21,
+          url: "https://github.test/acme/widgets/pull/21",
+          branch: "symphony/sam-21-old-managed-pr",
+          title: "SAM-21: Old managed PR",
+          created: false
+        }
+      }
+    });
+
+    await orchestrator.tick();
+
+    expect(inspected).toBe(0);
+    expect(orchestrator.snapshot()).toMatchObject({ counts: { retrying: 0, pull_requests: 1 } });
+    await orchestrator.stop();
+  });
+
   test("restores durable retry queue and issue history on startup", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-durable-"));
     const cfg = config(root, "node missing.js");

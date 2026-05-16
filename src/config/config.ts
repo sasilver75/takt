@@ -117,6 +117,9 @@ export function validateDispatchConfig(config: SymphonyConfig): void {
   if (!config.codex.command.trim()) {
     throw new SymphonyError("missing_codex_command", "codex.command must be present");
   }
+  if (config.tracker.claim_state && !stateList(config.tracker.active_states).has(normalizeState(config.tracker.claim_state))) {
+    throw new SymphonyError("invalid_config_value", "tracker.claim_state must also be listed in tracker.active_states");
+  }
   if (config.runtime.kind === "docker" && !config.runtime.docker.image.trim()) {
     throw new SymphonyError("missing_runtime_image", "runtime.docker.image must be present when runtime.kind is docker");
   }

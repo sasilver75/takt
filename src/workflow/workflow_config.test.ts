@@ -119,4 +119,15 @@ describe("workflow loader and config", () => {
     expect(() => validateDispatchConfig(config)).toThrow(SymphonyError);
     expect(() => validateDispatchConfig(config)).toThrow(/API key is missing/);
   });
+
+  test("dispatch validation rejects a claim state outside active states", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(
+      workflowPath,
+      "---\ntracker:\n  kind: linear\n  api_key: $TOKEN\n  project_slug: demo\n  active_states:\n    - Ready\n  claim_state: In Progress\n---\nbody"
+    );
+    const config = resolveConfig(await loadWorkflow(workflowPath), { TOKEN: "secret" });
+    expect(() => validateDispatchConfig(config)).toThrow(/claim_state must also be listed/);
+  });
 });
