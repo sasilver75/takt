@@ -488,9 +488,7 @@ export class Orchestrator {
     }
 
     const attempt = nextAttempt(record.restart_count === 0 ? null : record.restart_count);
-    const handledKeys = readHandledPullRequestFollowupKeys(record);
-    for (const item of feedback) handledKeys.add(item.key);
-    record.tracked.github_pr_followup_keys = [...handledKeys].sort();
+    record.tracked.github_pr_inflight_followup_keys = feedback.map((item) => item.key).sort();
     record.tracked.github_pr_last_followup_key = `feedback:${feedback.map((item) => item.key).sort().join("|")}`;
     record.tracked.github_pr_followup_reason = reason;
     record.tracked.github_pr_followup_context = context;
@@ -688,6 +686,7 @@ export class Orchestrator {
       record.tracked.github_pull_request = published;
       await this.options.tracker.commentOnIssue?.(issue, `Published PR: ${published.url}`);
       await this.ensureIssueReviewState(record, issue, "pull_request_publish", true);
+      this.markPullRequestFollowupHandled(record);
       this.recordEvent({
         at: new Date().toISOString(),
         event: "pull_request_published",
@@ -846,6 +845,17 @@ export class Orchestrator {
     const ok = this.shouldDispatch(issue);
     if (wasClaimed) this.state.claimed.add(issue.id);
     return ok;
+  }
+
+  private markPullRequestFollowupHandled(record: IssueDebugRecord): void {
+    const inflightKeys = readStringArray(record.tracked.github_pr_inflight_followup_keys);
+    if (inflightKeys.length === 0) return;
+    const handledKeys = new Set(readHandledPullRequestFollowupKeys(record));
+    for (const key of inflightKeys) handledKeys.add(key);
+    const values = [...handledKeys].sort();
+    record.tracked.github_pr_handled_followup_keys = values;
+    record.tracked.github_pr_followup_keys = values;
+    delete record.tracked.github_pr_inflight_followup_keys;
   }
 
   private async terminateRunning(issueId: string, reason: string, cleanupWorkspace: boolean): Promise<void> {
@@ -1053,14 +1063,12 @@ function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledK
 }
 
 function readHandledPullRequestFollowupKeys(record: IssueDebugRecord): Set<string> {
-  const values = new Set<string>();
-  const raw = record.tracked.github_pr_followup_keys;
-  if (Array.isArray(raw)) {
-    for (const value of raw) {
-      if (typeof value === "string" && value.trim()) values.add(value);
-    }
-  }
-  return values;
+  return new Set(readStringArray(record.tracked.github_pr_handled_followup_keys));
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
 }
 
 function actionableChecks(inspection: PullRequestInspection): PullRequestInspection["checks"] {
