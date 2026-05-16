@@ -128,18 +128,22 @@ export class CodexAppServerClient {
   }
 
   private async waitForTurn(turnId: string): Promise<string> {
-    const deadline = Date.now() + this.options.config.codex.turn_timeout_ms;
     return new Promise((resolve, reject) => {
-      const check = () => {
-        if (Date.now() > deadline) reject(new SymphonyError("turn_timeout", `Turn ${turnId} timed out`));
-        else setTimeout(check, 100);
-      };
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        unsubscribe();
+        reject(new SymphonyError("turn_timeout", `Turn ${turnId} timed out`));
+      }, this.options.config.codex.turn_timeout_ms);
       const unsubscribe = this.onTurnTerminal(turnId, (status, error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         unsubscribe();
         if (error) reject(error);
         else resolve(status);
       });
-      check();
     });
   }
 
@@ -149,7 +153,10 @@ export class CodexAppServerClient {
     const set = this.turnWaiters.get(turnId) ?? new Set();
     set.add(callback);
     this.turnWaiters.set(turnId, set);
-    return () => set.delete(callback);
+    return () => {
+      set.delete(callback);
+      if (set.size === 0) this.turnWaiters.delete(turnId);
+    };
   }
 
   private handleLine(line: string): void {
