@@ -123,6 +123,79 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("reconciles tracker review state for open PRs after external automation moves it back", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-review-state-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-reconcile", identifier: "SAM-9", state: "Todo", title: "Ship PR loop" });
+    const tracker = new LocalTracker([activeIssue]);
+    const publisher: PullRequestPublisher = {
+      async publish() {
+        return { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9-ship-pr-loop", title: "SAM-9: Ship PR loop", created: true };
+      }
+    };
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        return {
+          number: 9,
+          url: "https://github.test/acme/widgets/pull/9",
+          branch: "symphony/sam-9-ship-pr-loop",
+          title: "SAM-9: Ship PR loop",
+          state: "open",
+          checks_status: "success",
+          review_status: "review_required",
+          head_sha: "abc123def456",
+          mergeable_state: "clean",
+          draft: false,
+          checked_at: new Date().toISOString(),
+          summary: "PR #9 is open; checks=success; review=review_required at abc123def456.",
+          checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/9" }],
+          reviews: [],
+          review_comments: []
+        };
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => tracker.getIssue("i-pr-reconcile")?.state === "Needs Human", "initial review-state transition");
+    await tracker.transitionIssue(activeIssue, "In Progress");
+
+    await orchestrator.tick();
+
+    expect(tracker.getIssue("i-pr-reconcile")?.state).toBe("Needs Human");
+    expect(orchestrator.issueSnapshot("SAM-9")).toMatchObject({
+      tracked: { tracker_review_state: "Needs Human", tracker_review_state_source: "pull_request_reconcile" }
+    });
+    await orchestrator.stop();
+  });
+
   test("requeues worker follow-up when a published PR has failing checks", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-followup-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");

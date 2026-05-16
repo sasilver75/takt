@@ -407,7 +407,10 @@ export class Orchestrator {
       }
       const reason = pullRequestFollowupReason(inspection);
       if (reason) await this.queuePullRequestFollowup(record, pullRequest, inspection, reason);
-      else this.persistState();
+      else {
+        await this.ensureIssueReviewState(record, null, "pull_request_reconcile", false);
+        this.persistState();
+      }
     }
   }
 
@@ -680,10 +683,7 @@ export class Orchestrator {
       const record = this.ensureRecord(issue);
       record.tracked.github_pull_request = published;
       await this.options.tracker.commentOnIssue?.(issue, `Published PR: ${published.url}`);
-      if (config.tracker.review_state) {
-        if (!this.options.tracker.transitionIssue) throw new Error("Tracker does not support issue state transitions");
-        await this.options.tracker.transitionIssue(issue, config.tracker.review_state);
-      }
+      await this.ensureIssueReviewState(record, issue, "pull_request_publish", true);
       this.recordEvent({
         at: new Date().toISOString(),
         event: "pull_request_published",
@@ -703,6 +703,91 @@ export class Orchestrator {
         message
       });
       return false;
+    }
+  }
+
+  private async ensureIssueReviewState(record: IssueDebugRecord, knownIssue: Issue | null, source: string, throwOnFailure: boolean): Promise<void> {
+    const reviewState = this.options.getConfig().tracker.review_state;
+    if (!reviewState) return;
+    if (!this.options.tracker.transitionIssue) {
+      const message = "Tracker does not support issue state transitions";
+      record.last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "issue_review_state_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: `${source}: ${message}`
+      });
+      if (throwOnFailure) throw new Error(message);
+      return;
+    }
+
+    let issue = knownIssue;
+    if (!issue) {
+      try {
+        const refreshed = await this.options.tracker.fetchIssueStatesByIds([record.issue_id]);
+        issue = refreshed[0] ?? null;
+      } catch (error) {
+        const message = errorMessage(error);
+        record.last_error = message;
+        this.recordEvent({
+          at: new Date().toISOString(),
+          event: "issue_review_state_failed",
+          issue_id: record.issue_id,
+          issue_identifier: record.issue_identifier,
+          message: `${source}: ${message}`
+        });
+        if (throwOnFailure) throw error;
+        return;
+      }
+    }
+
+    if (!issue) {
+      const message = "Tracked issue could not be refreshed for review-state reconciliation";
+      record.last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "issue_review_state_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: `${source}: ${message}`
+      });
+      if (throwOnFailure) throw new Error(message);
+      return;
+    }
+
+    const checkedAt = new Date().toISOString();
+    if (normalizeState(issue.state) === normalizeState(reviewState)) {
+      record.tracked.tracker_review_state = issue.state;
+      record.tracked.tracker_review_state_checked_at = checkedAt;
+      record.tracked.tracker_review_state_source = source;
+      return;
+    }
+
+    try {
+      const updated = await this.options.tracker.transitionIssue(issue, reviewState);
+      record.tracked.tracker_review_state = updated.state;
+      record.tracked.tracker_review_state_checked_at = checkedAt;
+      record.tracked.tracker_review_state_source = source;
+      this.recordEvent({
+        at: checkedAt,
+        event: "issue_review_state_reconciled",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: `${source}: ${issue.state} -> ${updated.state}`
+      });
+    } catch (error) {
+      const message = errorMessage(error);
+      record.last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "issue_review_state_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: `${source}: ${message}`
+      });
+      if (throwOnFailure) throw error;
     }
   }
 
