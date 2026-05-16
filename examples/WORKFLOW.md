@@ -114,7 +114,7 @@ If you ran the application, used Playwright, captured screenshots/traces/logs, o
 }
 ```
 
-Commit all durable artifact files listed by path. Do not commit transient server logs unless they are intentionally useful evidence.
+Small local files or directories listed under `artifacts/` may be left uncommitted; Symphony will publish those evidence files to the PR branch before posting the PR evidence comment. Commit artifact files outside `artifacts/` if they are intentionally durable reviewer evidence. Do not commit transient server logs unless they are intentionally useful evidence.
 
 Do not create the GitHub PR yourself and do not move the Linear issue to review. Symphony will push the branch, create or update the PR, publish evidence as a PR comment, comment the PR link in Linear, and move the issue to `Needs Human`.
 
