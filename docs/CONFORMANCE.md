@@ -30,7 +30,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Hosted `linear_graphql` MCP bridge | `src/agent/linearGraphqlBridge.ts`, `src/agent/linearGraphqlMcp.ts`, `src/tracker/linear.ts` | `src/agent/linearGraphqlBridge.test.ts`, `src/agent/linearGraphqlMcp.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Durable state | `src/persistence/jsonStateStore.ts`, `src/orchestrator/orchestrator.ts` | `src/persistence/jsonStateStore.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | GitHub PR publishing and lifecycle reconciliation | `src/github/publisher.ts`, `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/publisher.test.ts`, `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts` |
-| Worker evidence manifest and sticky PR evidence comment | `src/github/evidence.ts`, `src/orchestrator/orchestrator.ts` | `src/github/evidence.test.ts`, `src/orchestrator/orchestrator.test.ts`, live PR `#3` |
+| Worker evidence manifest and sticky PR evidence comment | `src/github/evidence.ts`, `src/orchestrator/orchestrator.ts` | `src/github/evidence.test.ts`, `src/orchestrator/orchestrator.test.ts`, live PRs `#3` and `#4` |
 | Policy-gated GitHub merge extension | `src/github/merger.ts`, `src/orchestrator/orchestrator.ts` | `src/github/merger.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Docker-first worker runtime | `src/runtime/workerRuntime.ts`, `docker/codex-worker.Dockerfile`, `docs/OPERATIONS.md` | `src/runtime/workerRuntime.test.ts`, live `SAM-71` run |
 | PR follow-up from checks/comments/reviews/threads | `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts`, live PR `#3` |
@@ -40,11 +40,11 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 - Local deterministic gate: `pnpm verify`.
 - App-shaped factory harness: `pnpm test:factory`.
 - Live Linear/Codex/Docker history: `docs/OPERATIONS.md`.
-- Latest live PR loop evidence: PR `#3`, sticky evidence comment `#issuecomment-4466317854`.
+- Latest live PR loop evidence: PR `#4`, sticky evidence comment `#issuecomment-4467788558`.
 
 ## Known Gaps And Watch Items
 
 - Real integration checks are operator-run, not automatic CI gates, because they mutate Linear/GitHub and require live credentials.
 - The HTTP dashboard is functional and state-backed, but intentionally minimal; richer drill-down history and artifact browsing remain product work.
-- Workers can attach durable artifacts through committed files and evidence manifests. Large binary artifact retention, external object storage, video capture conventions, and trace viewers are not yet first-class orchestration features.
+- Workers can attach durable artifacts through committed files and evidence manifests, and Symphony warns when listed artifact paths are missing or not tracked. Large binary artifact retention, external object storage, video capture conventions, and trace viewers are not yet first-class orchestration features.
 - The spec's SSH worker appendix is not implemented; Docker is the first-class isolation runtime.

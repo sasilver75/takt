@@ -54,7 +54,7 @@ When `github.enabled: true`, the issue-to-PR loop is:
 
 1. Symphony moves the issue to `tracker.claim_state` before launching the worker.
 2. The worker implements, verifies, commits, and writes `github.pr_ready_file` in the workspace root.
-3. If useful, the worker writes `github.evidence_file` with reviewer evidence such as app URLs, verification commands, screenshots, traces, logs, or reports. Durable artifact files listed by path should be committed with the worker changes.
+3. If useful, the worker writes `github.evidence_file` with reviewer evidence such as app URLs, verification commands, screenshots, traces, logs, or reports. Durable artifact files listed by path should be committed with the worker changes. Symphony renders repository-relative artifact paths as PR-branch links and adds artifact warnings when a listed path is missing, invalid, outside the workspace, or not tracked by git at publish time.
 4. Symphony pushes a branch named from `github.branch_prefix` and the issue identifier/title.
 5. Symphony creates or updates a GitHub PR against `github.base_branch`.
 6. Symphony publishes evidence as a sticky PR conversation comment, comments the PR URL in Linear, and moves the issue to `tracker.review_state`.

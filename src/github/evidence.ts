@@ -1,10 +1,14 @@
+import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { EvidenceArtifact, EvidenceManifest, PullRequestEvidencePublication, PullRequestEvidencePublisher, PublishedPullRequest, SymphonyConfig } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import { GitHubApiClient, type FetchLike } from "./client.js";
 
 export const SYMPHONY_EVIDENCE_COMMENT_MARKER = "<!-- symphony:evidence -->";
+const execFileAsync = promisify(execFile);
 
 export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePublisher {
   private readonly api: GitHubApiClient;
@@ -27,7 +31,8 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
     if (!config.enabled) throw new SymphonyError("github_disabled", "GitHub evidence publishing is disabled");
     if (!config.owner || !config.repo || !config.token) throw new SymphonyError("github_not_configured", "GitHub evidence publishing is not fully configured");
 
-    const body = renderEvidenceComment(input.pullRequest, input.manifest, input.workspacePath, { owner: config.owner, repo: config.repo });
+    const artifactWarnings = await evidenceArtifactWarnings(input.workspacePath, input.manifest);
+    const body = renderEvidenceComment(input.pullRequest, input.manifest, input.workspacePath, { owner: config.owner, repo: config.repo }, artifactWarnings);
     const existingCommentId = input.previousCommentId ?? (await this.findExistingEvidenceComment(input.pullRequest.number));
     const payload = existingCommentId
       ? await this.updateExistingComment(input.pullRequest.number, existingCommentId, body)
@@ -77,7 +82,8 @@ export function renderEvidenceComment(
   pullRequest: PublishedPullRequest,
   manifest: EvidenceManifest,
   workspacePath?: string,
-  repository?: { owner: string | null; repo: string | null }
+  repository?: { owner: string | null; repo: string | null },
+  artifactWarnings: string[] = []
 ): string {
   const lines = [
     SYMPHONY_EVIDENCE_COMMENT_MARKER,
@@ -104,8 +110,47 @@ export function renderEvidenceComment(
     for (const artifact of artifacts.slice(0, 50)) lines.push(`- ${renderArtifact(pullRequest, artifact, workspacePath, repository)}`);
   }
 
+  if (artifactWarnings.length > 0) {
+    lines.push("", "### Artifact Warnings");
+    for (const warning of artifactWarnings.slice(0, 50)) lines.push(`- ${singleLine(warning)}`);
+  }
+
   if (manifest.notes?.trim()) lines.push("", "### Notes", manifest.notes.trim());
   return lines.join("\n");
+}
+
+async function evidenceArtifactWarnings(workspacePath: string, manifest: EvidenceManifest): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const artifact of manifest.artifacts ?? []) {
+    if (artifact.url?.trim()) continue;
+    const rawPath = artifact.path?.trim();
+    if (!rawPath) continue;
+    const normalizedPath = normalizeArtifactPath(rawPath, workspacePath);
+    if (!normalizedPath) {
+      warnings.push(`Artifact path cannot be linked because it is outside the workspace or invalid: ${rawPath}`);
+      continue;
+    }
+    try {
+      const info = await stat(path.join(workspacePath, normalizedPath));
+      if (!info.isFile() && !info.isDirectory()) warnings.push(`Artifact path is not a regular file or directory: ${normalizedPath}`);
+    } catch {
+      warnings.push(`Artifact path was not found in the worker workspace at publish time: ${normalizedPath}`);
+      continue;
+    }
+    if (!(await isGitTracked(workspacePath, normalizedPath))) {
+      warnings.push(`Artifact path is not tracked by git at publish time, so the PR branch link may be unavailable: ${normalizedPath}`);
+    }
+  }
+  return warnings;
+}
+
+async function isGitTracked(workspacePath: string, normalizedPath: string): Promise<boolean> {
+  try {
+    await execFileAsync("git", ["ls-files", "--error-unmatch", "--", normalizedPath], { cwd: workspacePath });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function renderArtifact(pullRequest: PublishedPullRequest, artifact: EvidenceArtifact, workspacePath?: string, repository?: { owner: string | null; repo: string | null }): string {

@@ -39,6 +39,8 @@ describe("GitHub PR evidence publisher", () => {
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("artifacts/SAM-9/home.png");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("https://github.test/acme/widgets/blob/symphony/sam-9/artifacts/SAM-9/home.png");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("npx playwright test");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("### Artifact Warnings");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("was not found in the worker workspace");
   });
 
   test("updates an existing evidence comment when the marker is present", async () => {
@@ -100,6 +102,18 @@ describe("GitHub PR evidence publisher", () => {
     expect(body).toContain(SYMPHONY_EVIDENCE_COMMENT_MARKER);
     expect(body).toContain("`artifacts/SAM-1/report.txt`");
     expect(body).not.toContain("outside");
+  });
+
+  test("renders artifact validation warnings when evidence paths are weak", () => {
+    const body = renderEvidenceComment(
+      { number: 2, url: "https://github.test/acme/widgets/pull/2", branch: "symphony/sam-2", title: "SAM-2", created: true },
+      { summary: "Done", artifacts: [{ path: "artifacts/SAM-2/missing.png", kind: "screenshot" }] },
+      "/tmp/workspace",
+      { owner: "acme", repo: "widgets" },
+      ["Artifact path was not found in the worker workspace at publish time: artifacts/SAM-2/missing.png"]
+    );
+    expect(body).toContain("### Artifact Warnings");
+    expect(body).toContain("artifacts/SAM-2/missing.png");
   });
 });
 
