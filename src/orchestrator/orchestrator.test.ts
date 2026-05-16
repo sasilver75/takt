@@ -49,9 +49,15 @@ describe("orchestrator", () => {
     });
     await orchestrator.tick();
     await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "continuation retry");
-    const snapshot = orchestrator.snapshot() as { counts: { retrying: number }; codex_totals: { total_tokens: number } };
+    const snapshot = orchestrator.snapshot() as {
+      counts: { retrying: number };
+      codex_totals: { total_tokens: number };
+      recent_events: Array<{ event: string; issue_identifier?: string; message?: string | null }>;
+    };
     expect(snapshot.counts.retrying).toBe(1);
     expect(snapshot.codex_totals.total_tokens).toBe(7);
+    expect(snapshot.recent_events.some((event) => event.event === "dispatch" && event.issue_identifier === "ABC-1")).toBe(true);
+    expect(snapshot.recent_events.some((event) => event.event === "turn/completed" && event.issue_identifier === "ABC-1")).toBe(true);
     await orchestrator.stop();
   });
 

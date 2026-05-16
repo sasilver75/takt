@@ -183,6 +183,7 @@ export class Orchestrator {
       running,
       retrying,
       pull_requests: pullRequests,
+      recent_events: this.state.recent_events.slice(-200),
       codex_totals: {
         ...this.state.codex_totals,
         seconds_running: this.state.codex_totals.seconds_running + activeSeconds
