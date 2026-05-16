@@ -138,6 +138,50 @@ describe("GitHub PR publisher", () => {
     expect(requests.map((request) => request.method)).toEqual(["GET", "PATCH"]);
     expect(requests[1]?.body).toMatchObject({ title: "SAM-123: Add publish loop" });
   });
+
+  test("rejects committed handoff manifests before publishing", async () => {
+    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-committed-manifest-"));
+    const remote = path.join(temp, "remote.git");
+    const seed = path.join(temp, "seed");
+    const workspace = path.join(temp, "workspace");
+    await git(temp, "init", "--bare", remote);
+    await mkdir(seed);
+    await git(seed, "init", "--initial-branch=main");
+    await git(seed, "config", "user.name", "Symphony Test");
+    await git(seed, "config", "user.email", "symphony-test@example.invalid");
+    await writeFile(path.join(seed, "README.md"), "base\n");
+    await git(seed, "add", "README.md");
+    await git(seed, "commit", "-m", "base");
+    await git(seed, "remote", "add", "origin", remote);
+    await git(seed, "push", "origin", "main");
+    await git(temp, "clone", remote, workspace);
+    await git(workspace, "checkout", "main");
+    await git(workspace, "config", "user.name", "Symphony Worker");
+    await git(workspace, "config", "user.email", "symphony-worker@example.invalid");
+    await writeFile(path.join(workspace, "feature.txt"), "done\n");
+    await writeFile(path.join(workspace, "SYMPHONY_PR_READY.json"), "{}\n");
+    await git(workspace, "add", "feature.txt", "SYMPHONY_PR_READY.json");
+    await git(workspace, "commit", "-m", "Accidentally commit handoff manifest");
+
+    const publisher = new GitHubPullRequestPublisher(
+      () => config(temp, remote),
+      createLogger(() => undefined),
+      async () => {
+        throw new Error("GitHub API should not be called");
+      }
+    );
+
+    await expect(
+      publisher.publish({
+        issue: issue({ identifier: "SAM-123", title: "Add publish loop", url: "https://linear.test/SAM-123" }),
+        workspacePath: workspace,
+        manifest: { summary: "Implemented the publishing path.", verification: ["pnpm test"], risk: "Low" }
+      })
+    ).rejects.toMatchObject({
+      code: "github_committed_handoff_manifest",
+      message: "Handoff manifest files must not be committed: SYMPHONY_PR_READY.json"
+    });
+  });
 });
 
 function config(root: string, remote: string): SymphonyConfig {

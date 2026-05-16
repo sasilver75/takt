@@ -1,6 +1,0 @@
-{
-  "title": "SAM-73: document durable restart validation",
-  "summary": "Updated the live durable restart result note to explicitly confirm the PR review feedback loop was validated on 2026-05-16.",
-  "verification": ["pnpm typecheck"],
-  "risk": "Notable none; documentation-only follow-up."
-}

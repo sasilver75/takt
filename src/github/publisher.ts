@@ -28,6 +28,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     if (!config.owner || !config.repo || !config.token) throw new SymphonyError("github_not_configured", "GitHub publishing is not fully configured");
 
     const branch = branchName(config.branch_prefix, input.issue);
+    await ensureHandoffManifestsUntracked(input.workspacePath, [config.pr_ready_file, config.evidence_file]);
     await ensureCleanWorkspace(input.workspacePath, [config.pr_ready_file, config.evidence_file], localEvidenceArtifactRoots(input.evidenceManifest, input.workspacePath));
     await git(input.workspacePath, ["fetch", config.remote, config.base_branch]);
     const baseRef = `FETCH_HEAD`;
@@ -141,6 +142,25 @@ async function ensureCleanWorkspace(workspacePath: string, ignoredRootFiles: str
       return statusPath && !ignored.has(statusPath) && !isAllowedDirtyPath(statusPath, allowedDirtyPaths);
     });
   if (dirty.length > 0) throw new SymphonyError("github_dirty_workspace", "Workspace has uncommitted changes; worker must commit before PR publishing");
+}
+
+async function ensureHandoffManifestsUntracked(workspacePath: string, fileNames: string[]): Promise<void> {
+  const tracked: string[] = [];
+  for (const fileName of fileNames) {
+    if (await isGitTracked(workspacePath, fileName)) tracked.push(fileName);
+  }
+  if (tracked.length > 0) {
+    throw new SymphonyError("github_committed_handoff_manifest", `Handoff manifest files must not be committed: ${tracked.join(", ")}`);
+  }
+}
+
+async function isGitTracked(workspacePath: string, fileName: string): Promise<boolean> {
+  try {
+    await git(workspacePath, ["ls-files", "--error-unmatch", "--", fileName]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function gitStatusPath(line: string): string | null {
