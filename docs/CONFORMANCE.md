@@ -14,7 +14,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Linear candidate fetch, terminal fetch, state refresh | `src/tracker/linear.ts` | `src/tracker/linear.test.ts` |
 | Sanitized, contained per-issue workspaces | `src/workspace/manager.ts` | `src/workspace/manager.test.ts` |
 | Workspace lifecycle hooks and timeouts | `src/workspace/manager.ts`, `src/runtime/workerRuntime.ts` | `src/workspace/manager.test.ts`, `src/runtime/workerRuntime.test.ts`, `src/harness/toyWebappFactory.test.ts` |
-| Codex app-server JSON-line client and same-thread continuation turns | `src/agent/codexClient.ts`, `src/agent/runner.ts` | `src/agent/runner.test.ts`, `src/harness/toyWebappFactory.test.ts` |
+| Codex app-server JSON-line client, same-thread continuation turns, and timeout classification | `src/agent/codexClient.ts`, `src/agent/runner.ts` | `src/agent/runner.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Configurable Codex launch command | `src/config/config.ts`, `src/runtime/workerRuntime.ts`, `src/agent/codexClient.ts` | `src/workflow/workflow_config.test.ts`, `src/agent/runner.test.ts` |
 | Strict prompt rendering with issue/attempt/follow-up context | `src/workflow/prompt.ts` | `src/workflow/workflow_config.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Retry queue, continuation retries, slot-exhaustion requeue, exponential backoff cap | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |

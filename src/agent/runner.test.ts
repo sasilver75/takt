@@ -109,6 +109,48 @@ describe("agent runner with fake Codex app-server", () => {
     expect(promptLog).toContain("turn-2:Continue the same Linear issue from the existing thread history.");
     expect(promptLog.match(/Implement ABC-1 exactly once/g)).toHaveLength(1);
   });
+
+  test("classifies app-server request timeouts", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-response-timeout-"));
+    const serverPath = path.join(root, "fake-codex-no-response.mjs");
+    await writeFile(serverPath, fakeNoResponseCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const baseConfig = config(root, `node ${serverPath}`);
+    const cfg = { ...baseConfig, codex: { ...baseConfig.codex, read_timeout_ms: 80 } };
+    const handle = new AgentRunHandle({
+      issue: issue(),
+      attempt: null,
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Implement {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      tracker: new FakeTracker([], [], []),
+      logger: createLogger(() => undefined),
+      onEvent: () => undefined
+    });
+
+    await expect(handle.run()).resolves.toMatchObject({ ok: false, reason: "response_timeout" });
+  });
+
+  test("classifies app-server turn timeouts", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-turn-timeout-"));
+    const serverPath = path.join(root, "fake-codex-hanging-turn.mjs");
+    await writeFile(serverPath, fakeHangingTurnCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const baseConfig = config(root, `node ${serverPath}`);
+    const cfg = { ...baseConfig, codex: { ...baseConfig.codex, turn_timeout_ms: 120 } };
+    const handle = new AgentRunHandle({
+      issue: issue(),
+      attempt: null,
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Implement {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      tracker: new FakeTracker([], [], []),
+      logger: createLogger(() => undefined),
+      onEvent: () => undefined
+    });
+
+    await expect(handle.run()).resolves.toMatchObject({ ok: false, reason: "turn_timeout" });
+  });
 });
 
 function config(root: string, command: string): SymphonyConfig {
@@ -235,6 +277,30 @@ rl.on("line", (line) => {
       send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: turnId, items: [], itemsView: "all", status: "inProgress", error: null, startedAt: turnCount, completedAt: null, durationMs: null } } });
       send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: turnId, items: [], itemsView: "all", status: "completed", error: null, startedAt: turnCount, completedAt: turnCount + 1, durationMs: 1 } } });
     }, 10);
+  }
+});
+`;
+}
+
+function fakeNoResponseCodexServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+createInterface({ input: process.stdin }).on("line", () => undefined);
+`;
+}
+
+function fakeHangingTurnCodexServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: { userAgent: "fake", codexHome: process.cwd(), platformFamily: "unix", platformOs: "test" } });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" }, cwd: process.cwd(), model: "fake", modelProvider: "fake", serviceTier: null, instructionSources: [], approvalPolicy: "never", approvalsReviewer: "client", sandbox: {}, reasoningEffort: null } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+    send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
   }
 });
 `;
