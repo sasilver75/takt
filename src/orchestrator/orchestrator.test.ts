@@ -174,7 +174,7 @@ describe("orchestrator", () => {
     const evidencePublisher: PullRequestEvidencePublisher = {
       async publish(input) {
         evidencePublished.push(input);
-        return { comment_id: 1818, url: "https://github.test/acme/widgets/pull/18#issuecomment-1818" };
+        return { comment_id: 1818, url: "https://github.test/acme/widgets/pull/18#issuecomment-1818", warnings: ["Artifact path is not tracked by git at publish time"] };
       }
     };
     const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
@@ -210,6 +210,7 @@ describe("orchestrator", () => {
       tracked: {
         github_evidence_comment_id: 1818,
         github_evidence_comment_url: "https://github.test/acme/widgets/pull/18#issuecomment-1818",
+        github_evidence_warnings: ["Artifact path is not tracked by git at publish time"],
         github_evidence_manifest: {
           artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
         }
@@ -221,6 +222,7 @@ describe("orchestrator", () => {
           issue_identifier: "SAM-18",
           evidence: {
             comment_url: "https://github.test/acme/widgets/pull/18#issuecomment-1818",
+            warnings: ["Artifact path is not tracked by git at publish time"],
             manifest: {
               verification: ["pnpm test", "npx playwright test"],
               app_urls: ["http://127.0.0.1:3000"],

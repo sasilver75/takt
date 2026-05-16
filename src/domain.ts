@@ -330,6 +330,7 @@ export type PullRequestMerger = {
 export type PullRequestEvidencePublication = {
   comment_id: number;
   url: string | null;
+  warnings: string[];
 };
 
 export type PullRequestEvidencePublisher = {

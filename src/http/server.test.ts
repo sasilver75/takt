@@ -17,6 +17,7 @@ describe("HTTP status server", () => {
             status: { state: "open", checks_status: "success", review_status: "review_required", summary: "PR #7 is open." },
             evidence: {
               comment_url: "https://github.test/acme/widgets/pull/7#issuecomment-1",
+              warnings: ["Artifact path is not tracked by git at publish time"],
               manifest: { artifacts: [{ path: "artifacts/ABC-1/home.png" }], app_urls: ["http://127.0.0.1:3000"], verification: ["pnpm test"] }
             }
           }
@@ -48,6 +49,7 @@ describe("HTTP status server", () => {
                 },
                 github_evidence_comment_url: "https://github.test/acme/widgets/pull/7#issuecomment-1",
                 github_evidence_published_at: "2026-01-01T00:00:02.000Z",
+                github_evidence_warnings: ["Artifact path is not tracked by git at publish time"],
                 github_evidence_manifest: {
                   summary: "Verified in browser.",
                   artifacts: [{ kind: "screenshot", path: "artifacts/ABC-1/home.png", description: "Homepage" }],
@@ -80,12 +82,13 @@ describe("HTTP status server", () => {
     expect(dashboard).toContain("Symphony Status");
     expect(dashboard).toContain("Recent Events");
     expect(dashboard).toContain("/issues/ABC-1");
-    expect(dashboard).toContain("evidence (1 artifact, 1 app URL, 1 check)");
+    expect(dashboard).toContain("evidence (1 artifact, 1 app URL, 1 check, 1 warning)");
     expect(dashboard).toContain("Worker started");
     const issuePage = await (await fetch(`${base}/issues/ABC-1`)).text();
     expect(issuePage).toContain("Issue ABC-1");
     expect(issuePage).toContain("/api/v1/ABC-1");
     expect(issuePage).toContain("artifacts/ABC-1/home.png");
+    expect(issuePage).toContain("Artifact path is not tracked by git at publish time");
     expect(issuePage).toContain("Verified in browser.");
     expect(issuePage).toContain("Worker started");
     expect((await (await fetch(`${base}/api/v1/state`)).json()).counts.running).toBe(1);

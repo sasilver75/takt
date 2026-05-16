@@ -31,7 +31,11 @@ describe("GitHub PR evidence publisher", () => {
           notes: "No known reviewer caveats."
         }
       })
-    ).resolves.toEqual({ comment_id: 123, url: "https://github.test/acme/widgets/pull/9#issuecomment-123" });
+    ).resolves.toMatchObject({
+      comment_id: 123,
+      url: "https://github.test/acme/widgets/pull/9#issuecomment-123",
+      warnings: [expect.stringContaining("was not found in the worker workspace")]
+    });
 
     expect(requests.map((request) => request.method)).toEqual(["GET", "POST"]);
     expect(requests[1]?.url).toBe("https://api.github.test/repos/acme/widgets/issues/9/comments");
@@ -56,11 +60,11 @@ describe("GitHub PR evidence publisher", () => {
     };
     const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
 
-    await publisher.publish({
+    await expect(publisher.publish({
       pullRequest: { number: 10, url: "https://github.test/acme/widgets/pull/10", branch: "symphony/sam-10", title: "SAM-10", created: false },
       workspacePath: "/tmp/workspace",
       manifest: { summary: "Updated evidence." }
-    });
+    })).resolves.toMatchObject({ warnings: [] });
 
     expect(requests.map((request) => request.method)).toEqual(["GET", "PATCH"]);
     expect(requests[1]?.url).toBe("https://api.github.test/repos/acme/widgets/issues/comments/456");
@@ -82,14 +86,14 @@ describe("GitHub PR evidence publisher", () => {
     };
     const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
 
-    await publisher.publish({
+    await expect(publisher.publish({
       pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9", title: "SAM-9", created: true },
       workspacePath: workspace,
       manifest: {
         summary: "Verified with a local report.",
         artifacts: [{ kind: "report", path: "artifacts/SAM-9/report.txt", description: "Local reviewer report." }]
       }
-    });
+    })).resolves.toMatchObject({ warnings: [] });
 
     const put = requests.find((request) => request.method === "PUT");
     expect(put?.url).toBe("https://api.github.test/repos/acme/widgets/contents/artifacts/SAM-9/report.txt");
@@ -121,7 +125,7 @@ describe("GitHub PR evidence publisher", () => {
         manifest: { summary: "Fresh evidence." },
         previousCommentId: 456
       })
-    ).resolves.toEqual({ comment_id: 789, url: "https://github.test/comment/789" });
+    ).resolves.toEqual({ comment_id: 789, url: "https://github.test/comment/789", warnings: [] });
 
     expect(requests.map((request) => request.method)).toEqual(["PATCH", "GET", "POST"]);
     expect(requests[2]?.url).toBe("https://api.github.test/repos/acme/widgets/issues/11/comments");

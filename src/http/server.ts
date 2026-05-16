@@ -103,6 +103,7 @@ function renderDashboard(snapshot: unknown): string {
       evidence?: {
         comment_url?: string | null;
         last_error?: string | null;
+        warnings?: string[];
         manifest?: {
           artifacts?: unknown[];
           app_urls?: string[];
@@ -271,7 +272,8 @@ function renderPullRequestDetails(pullRequest: Record<string, unknown> | null, s
 function renderIssueEvidenceDetails(evidence: Record<string, unknown> | null, tracked: Record<string, unknown>): string {
   const commentUrl = readString(tracked.github_evidence_comment_url);
   const lastError = readString(tracked.github_evidence_last_error);
-  if (!evidence && !commentUrl && !lastError) return "<p>No worker evidence has been published for this issue.</p>";
+  const warnings = readStringArray(tracked.github_evidence_warnings);
+  if (!evidence && !commentUrl && !lastError && warnings.length === 0) return "<p>No worker evidence has been published for this issue.</p>";
   const verification = readStringArray(evidence?.verification);
   const appUrls = readStringArray(evidence?.app_urls);
   const artifacts = readObjectArray(evidence?.artifacts);
@@ -282,6 +284,7 @@ function renderIssueEvidenceDetails(evidence: Record<string, unknown> | null, tr
     <dt>Verification</dt><dd>${renderStringList(verification)}</dd>
     <dt>App URLs</dt><dd>${renderLinkedList(appUrls)}</dd>
     <dt>Artifacts</dt><dd>${renderArtifactList(artifacts)}</dd>
+    <dt>Warnings</dt><dd>${renderWarningList(warnings)}</dd>
     <dt>Notes</dt><dd>${escapeHtml(readString(evidence?.notes) ?? "")}</dd>
     <dt>Error</dt><dd>${escapeHtml(lastError ?? "")}</dd>
   </dl>`;
@@ -311,6 +314,11 @@ function renderArtifactList(artifacts: Record<string, unknown>[]): string {
     .join("")}</ul>`;
 }
 
+function renderWarningList(warnings: string[]): string {
+  if (warnings.length === 0) return "";
+  return `<ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`;
+}
+
 function readObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
@@ -333,6 +341,7 @@ function readString(value: unknown): string | null {
 function renderEvidenceCell(evidence: {
   comment_url?: string | null;
   last_error?: string | null;
+  warnings?: string[];
   manifest?: { artifacts?: unknown[]; app_urls?: string[]; verification?: string[] } | null;
 } | null): string {
   if (!evidence) return "";
@@ -340,7 +349,13 @@ function renderEvidenceCell(evidence: {
   const artifactCount = evidence.manifest?.artifacts?.length ?? 0;
   const appCount = evidence.manifest?.app_urls?.length ?? 0;
   const verificationCount = evidence.manifest?.verification?.length ?? 0;
-  const detail = [artifactCount ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "", appCount ? `${appCount} app URL${appCount === 1 ? "" : "s"}` : "", verificationCount ? `${verificationCount} check${verificationCount === 1 ? "" : "s"}` : ""]
+  const warningCount = evidence.warnings?.length ?? 0;
+  const detail = [
+    artifactCount ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "",
+    appCount ? `${appCount} app URL${appCount === 1 ? "" : "s"}` : "",
+    verificationCount ? `${verificationCount} check${verificationCount === 1 ? "" : "s"}` : "",
+    warningCount ? `${warningCount} warning${warningCount === 1 ? "" : "s"}` : ""
+  ]
     .filter(Boolean)
     .join(", ");
   const label = detail ? `evidence (${detail})` : "evidence";

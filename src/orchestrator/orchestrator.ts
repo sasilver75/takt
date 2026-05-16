@@ -833,13 +833,14 @@ export class Orchestrator {
       record.tracked.github_evidence_comment_url = published.url;
       record.tracked.github_evidence_published_at = new Date().toISOString();
       record.tracked.github_evidence_manifest = manifest;
+      record.tracked.github_evidence_warnings = published.warnings;
       delete record.tracked.github_evidence_last_error;
       this.recordEvent({
         at: new Date().toISOString(),
         event: "pull_request_evidence_published",
         issue_id: record.issue_id,
         issue_identifier: record.issue_identifier,
-        message: published.url
+        message: published.warnings.length > 0 ? `${published.url ?? "evidence published"} (${published.warnings.length} warning${published.warnings.length === 1 ? "" : "s"})` : published.url
       });
     } catch (error) {
       const message = errorMessage(error);
@@ -1225,11 +1226,13 @@ function readTrackedEvidence(tracked: Record<string, unknown>): unknown {
   const publishedAt = typeof tracked.github_evidence_published_at === "string" ? tracked.github_evidence_published_at : null;
   const lastError = typeof tracked.github_evidence_last_error === "string" ? tracked.github_evidence_last_error : null;
   const manifest = readTrackedEvidenceManifest(tracked.github_evidence_manifest);
-  if (!commentUrl && !publishedAt && !lastError && !manifest) return null;
+  const warnings = readStringArray(tracked.github_evidence_warnings);
+  if (!commentUrl && !publishedAt && !lastError && !manifest && warnings.length === 0) return null;
   return {
     comment_url: commentUrl,
     published_at: publishedAt,
     last_error: lastError,
+    warnings,
     manifest
   };
 }

@@ -45,8 +45,14 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
       : await this.createComment(input.pullRequest.number, body);
     const commentId = readCommentId(payload);
     const url = readString(payload.html_url);
-    this.logger.info("github pr evidence published", { pr_number: input.pullRequest.number, pr_url: input.pullRequest.url, comment_id: commentId, comment_url: url });
-    return { comment_id: commentId, url };
+    this.logger.info("github pr evidence published", {
+      pr_number: input.pullRequest.number,
+      pr_url: input.pullRequest.url,
+      comment_id: commentId,
+      comment_url: url,
+      warning_count: artifactWarnings.length
+    });
+    return { comment_id: commentId, url, warnings: artifactWarnings };
   }
 
   private async publishLocalArtifacts(
