@@ -196,7 +196,9 @@ export class CodexAppServerClient {
         this.emit("approval_auto_approved", { message: method });
       } else if (method === "item/tool/requestUserInput") {
         result = { answers: {} };
-        this.emit("turn_input_required", { message: "user input request failed by policy" });
+        const error = new SymphonyError("turn_input_required", "Codex requested user input and Symphony policy fails the turn");
+        this.emit("turn_input_required", { message: error.message });
+        this.failTurnFromParams(message.params, error);
       } else if (method === "mcpServer/elicitation/request") {
         result = { action: "accept", content: {}, _meta: null };
         this.emit("mcp_elicitation_auto_accepted", { message: mcpElicitationMessage(message.params) });
@@ -210,6 +212,19 @@ export class CodexAppServerClient {
       result = { contentItems: [{ type: "inputText", text: errorMessage(error) }], success: false };
     }
     this.child?.stdin.write(`${JSON.stringify({ id, result })}\n`);
+  }
+
+  private failTurnFromParams(params: unknown, error: SymphonyError): void {
+    const record = params && typeof params === "object" ? (params as JsonObject) : {};
+    const turnId = typeof record.turnId === "string" ? record.turnId : null;
+    if (turnId) {
+      const waiters = this.turnWaiters.get(turnId);
+      for (const waiter of waiters ?? []) waiter("failed", error);
+      return;
+    }
+    for (const waiters of this.turnWaiters.values()) {
+      for (const waiter of waiters) waiter("failed", error);
+    }
   }
 
   private async handleDynamicTool(params: JsonObject): Promise<unknown> {

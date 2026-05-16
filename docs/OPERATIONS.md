@@ -38,7 +38,7 @@ docker build -f docker/codex-worker.Dockerfile -t symphony-codex-worker:latest .
 The current safety posture is:
 
 - Codex command execution and file-change approval requests are auto-approved for the session.
-- Codex user-input requests are not allowed to stall indefinitely; the client returns an empty response and records `turn_input_required`.
+- Codex user-input requests are not allowed to stall indefinitely; the client returns an empty protocol response, records `turn_input_required`, and fails the current worker run so the orchestrator retries or surfaces the blocker.
 - Workspace isolation is runtime-scoped: every agent subprocess is launched in the per-issue workspace inside the selected runtime, and host workspace paths must remain under `workspace.root`.
 - Leave `workspace.root` unset unless there is a concrete deployment reason; the default temp-directory root avoids package-manager parent traversal into this repo.
 - `after_create` and `before_remove` hooks are host workspace lifecycle hooks. `before_run` and `after_run` execute through the selected worker runtime, so Docker workflows install dependencies and write run evidence inside the same container filesystem view used by Codex. The example workflow clones once on `after_create`, then runs `git fetch origin main && git rebase origin/main` on every `before_run`; reused workspaces therefore replay worker commits onto the current source branch, while conflicts fail visibly instead of being destructively reset.
