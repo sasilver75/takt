@@ -84,6 +84,7 @@ When the HTTP extension is enabled:
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
 - `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live runtime-reachable MCP bridge, and was used by a worker. Tracker secret values and MCP bearer tokens are redacted before event payloads are recorded.
+- PR rows include evidence comment links and manifest summaries when a worker writes `github.evidence_file`, so operators can see artifact/app/check counts from the dashboard and `/api/v1/state`.
 
 ## Real Integration
 

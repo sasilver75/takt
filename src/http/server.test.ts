@@ -14,7 +14,11 @@ describe("HTTP status server", () => {
           {
             issue_identifier: "ABC-1",
             pull_request: { number: 7, url: "https://github.test/acme/widgets/pull/7" },
-            status: { state: "open", checks_status: "success", review_status: "review_required", summary: "PR #7 is open." }
+            status: { state: "open", checks_status: "success", review_status: "review_required", summary: "PR #7 is open." },
+            evidence: {
+              comment_url: "https://github.test/acme/widgets/pull/7#issuecomment-1",
+              manifest: { artifacts: [{ path: "artifacts/ABC-1/home.png" }], app_urls: ["http://127.0.0.1:3000"], verification: ["pnpm test"] }
+            }
           }
         ],
         recent_events: [{ at: "2026-01-01T00:00:01.000Z", event: "turn/started", issue_identifier: "ABC-1", session_id: "session-1", message: "Worker started" }],
@@ -45,6 +49,7 @@ describe("HTTP status server", () => {
     expect(dashboard).toContain("Symphony Status");
     expect(dashboard).toContain("Recent Events");
     expect(dashboard).toContain("/api/v1/ABC-1");
+    expect(dashboard).toContain("evidence (1 artifact, 1 app URL, 1 check)");
     expect(dashboard).toContain("Worker started");
     expect((await (await fetch(`${base}/api/v1/state`)).json()).counts.running).toBe(1);
     expect((await (await fetch(`${base}/api/v1/ABC-1`)).json()).status).toBe("known");

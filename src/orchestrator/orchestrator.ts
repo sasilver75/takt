@@ -172,7 +172,8 @@ export class Orchestrator {
           issue_id: record.issue_id,
           issue_identifier: record.issue_identifier,
           pull_request: pr,
-          status: record.tracked.github_pull_request_status ?? null
+          status: record.tracked.github_pull_request_status ?? null,
+          evidence: readTrackedEvidence(record.tracked)
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
@@ -805,6 +806,7 @@ export class Orchestrator {
       record.tracked.github_evidence_comment_id = published.comment_id;
       record.tracked.github_evidence_comment_url = published.url;
       record.tracked.github_evidence_published_at = new Date().toISOString();
+      record.tracked.github_evidence_manifest = manifest;
       delete record.tracked.github_evidence_last_error;
       this.recordEvent({
         at: new Date().toISOString(),
@@ -1182,6 +1184,32 @@ function readTrackedPullRequest(value: unknown): PublishedPullRequest | null {
   const created = typeof record.created === "boolean" ? record.created : false;
   if (!number || !url || !branch || !title) return null;
   return { number, url, branch, title, created };
+}
+
+function readTrackedEvidence(tracked: Record<string, unknown>): unknown {
+  const commentUrl = typeof tracked.github_evidence_comment_url === "string" ? tracked.github_evidence_comment_url : null;
+  const publishedAt = typeof tracked.github_evidence_published_at === "string" ? tracked.github_evidence_published_at : null;
+  const lastError = typeof tracked.github_evidence_last_error === "string" ? tracked.github_evidence_last_error : null;
+  const manifest = readTrackedEvidenceManifest(tracked.github_evidence_manifest);
+  if (!commentUrl && !publishedAt && !lastError && !manifest) return null;
+  return {
+    comment_url: commentUrl,
+    published_at: publishedAt,
+    last_error: lastError,
+    manifest
+  };
+}
+
+function readTrackedEvidenceManifest(value: unknown): EvidenceManifest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+    ...(Array.isArray(record.verification) ? { verification: record.verification.filter((entry): entry is string => typeof entry === "string") } : {}),
+    ...(Array.isArray(record.app_urls) ? { app_urls: record.app_urls.filter((entry): entry is string => typeof entry === "string") } : {}),
+    ...(Array.isArray(record.artifacts) ? { artifacts: record.artifacts.map(readEvidenceArtifact).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) } : {}),
+    ...(typeof record.notes === "string" ? { notes: record.notes } : {})
+  };
 }
 
 function pullRequestStatusKey(inspection: PullRequestInspection): string {

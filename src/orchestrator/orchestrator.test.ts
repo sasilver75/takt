@@ -200,8 +200,26 @@ describe("orchestrator", () => {
     expect(orchestrator.issueSnapshot("SAM-18")).toMatchObject({
       tracked: {
         github_evidence_comment_id: 1818,
-        github_evidence_comment_url: "https://github.test/acme/widgets/pull/18#issuecomment-1818"
+        github_evidence_comment_url: "https://github.test/acme/widgets/pull/18#issuecomment-1818",
+        github_evidence_manifest: {
+          artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
+        }
       }
+    });
+    expect(orchestrator.snapshot()).toMatchObject({
+      pull_requests: [
+        {
+          issue_identifier: "SAM-18",
+          evidence: {
+            comment_url: "https://github.test/acme/widgets/pull/18#issuecomment-1818",
+            manifest: {
+              verification: ["pnpm test", "npx playwright test"],
+              app_urls: ["http://127.0.0.1:3000"],
+              artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
+            }
+          }
+        }
+      ]
     });
     await orchestrator.stop();
   });

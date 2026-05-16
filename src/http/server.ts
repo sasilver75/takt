@@ -90,6 +90,15 @@ function renderDashboard(snapshot: unknown): string {
       issue_identifier: string;
       pull_request: { number: number; url: string };
       status: { state?: string; checks_status?: string; review_status?: string; summary?: string } | null;
+      evidence?: {
+        comment_url?: string | null;
+        last_error?: string | null;
+        manifest?: {
+          artifacts?: unknown[];
+          app_urls?: string[];
+          verification?: string[];
+        } | null;
+      } | null;
     }>;
   };
   const runningRows = (state.running ?? [])
@@ -101,7 +110,7 @@ function renderDashboard(snapshot: unknown): string {
   const prRows = (state.pull_requests ?? [])
     .map((row) => {
       const status = row.status;
-      return `<tr><td>${issueDrilldownLink(row.issue_identifier)}</td><td><a href="${escapeHtml(row.pull_request.url)}">#${row.pull_request.number}</a></td><td>${escapeHtml(status?.state ?? "")}</td><td>${escapeHtml(status?.checks_status ?? "")}</td><td>${escapeHtml(status?.review_status ?? "")}</td><td>${escapeHtml(status?.summary ?? "")}</td></tr>`;
+      return `<tr><td>${issueDrilldownLink(row.issue_identifier)}</td><td><a href="${escapeHtml(row.pull_request.url)}">#${row.pull_request.number}</a></td><td>${escapeHtml(status?.state ?? "")}</td><td>${escapeHtml(status?.checks_status ?? "")}</td><td>${escapeHtml(status?.review_status ?? "")}</td><td>${renderEvidenceCell(row.evidence ?? null)}</td><td>${escapeHtml(status?.summary ?? "")}</td></tr>`;
     })
     .join("");
   const eventRows = (state.recent_events ?? [])
@@ -143,7 +152,7 @@ function renderDashboard(snapshot: unknown): string {
     </div>
     <section><h2>Running</h2><table><thead><tr><th>Issue</th><th>State</th><th>Turns</th><th>Last Event</th></tr></thead><tbody>${runningRows}</tbody></table></section>
     <section><h2>Retry Queue</h2><table><thead><tr><th>Issue</th><th>Attempt</th><th>Due</th><th>Error</th></tr></thead><tbody>${retryRows}</tbody></table></section>
-    <section><h2>Pull Requests</h2><table><thead><tr><th>Issue</th><th>PR</th><th>State</th><th>Checks</th><th>Review</th><th>Summary</th></tr></thead><tbody>${prRows}</tbody></table></section>
+    <section><h2>Pull Requests</h2><table><thead><tr><th>Issue</th><th>PR</th><th>State</th><th>Checks</th><th>Review</th><th>Evidence</th><th>Summary</th></tr></thead><tbody>${prRows}</tbody></table></section>
     <section><h2>Recent Events</h2><table><thead><tr><th>Time</th><th>Event</th><th>Issue</th><th>Session</th><th>Message</th></tr></thead><tbody>${eventRows}</tbody></table></section>
   </main>
 </body>
@@ -152,6 +161,23 @@ function renderDashboard(snapshot: unknown): string {
 
 function issueDrilldownLink(identifier: string): string {
   return `<a href="/api/v1/${encodeURIComponent(identifier)}">${escapeHtml(identifier)}</a>`;
+}
+
+function renderEvidenceCell(evidence: {
+  comment_url?: string | null;
+  last_error?: string | null;
+  manifest?: { artifacts?: unknown[]; app_urls?: string[]; verification?: string[] } | null;
+} | null): string {
+  if (!evidence) return "";
+  if (evidence.last_error) return `<span title="${escapeHtml(evidence.last_error)}">error</span>`;
+  const artifactCount = evidence.manifest?.artifacts?.length ?? 0;
+  const appCount = evidence.manifest?.app_urls?.length ?? 0;
+  const verificationCount = evidence.manifest?.verification?.length ?? 0;
+  const detail = [artifactCount ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "", appCount ? `${appCount} app URL${appCount === 1 ? "" : "s"}` : "", verificationCount ? `${verificationCount} check${verificationCount === 1 ? "" : "s"}` : ""]
+    .filter(Boolean)
+    .join(", ");
+  const label = detail ? `evidence (${detail})` : "evidence";
+  return evidence.comment_url ? `<a href="${escapeHtml(evidence.comment_url)}">${escapeHtml(label)}</a>` : escapeHtml(label);
 }
 
 function escapeHtml(value: string): string {
