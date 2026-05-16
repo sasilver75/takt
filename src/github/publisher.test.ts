@@ -69,6 +69,71 @@ describe("GitHub PR publisher", () => {
       draft: false
     });
   });
+
+  test("updates an existing pull request branch with force-with-lease after rebase", async () => {
+    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-update-"));
+    const remote = path.join(temp, "remote.git");
+    const seed = path.join(temp, "seed");
+    const workspace = path.join(temp, "workspace");
+    const branch = "symphony/sam-123-add-publish-loop";
+    await git(temp, "init", "--bare", remote);
+    await mkdir(seed);
+    await git(seed, "init", "--initial-branch=main");
+    await git(seed, "config", "user.name", "Symphony Test");
+    await git(seed, "config", "user.email", "symphony-test@example.invalid");
+    await writeFile(path.join(seed, "README.md"), "base\n");
+    await git(seed, "add", "README.md");
+    await git(seed, "commit", "-m", "base");
+    await git(seed, "remote", "add", "origin", remote);
+    await git(seed, "push", "origin", "main");
+
+    await git(seed, "checkout", "-b", branch);
+    await writeFile(path.join(seed, "feature.txt"), "original worker change\n");
+    await git(seed, "add", "feature.txt");
+    await git(seed, "commit", "-m", "Add original worker change");
+    const oldRemoteSha = await gitOut(seed, "rev-parse", "HEAD");
+    await git(seed, "push", "origin", `HEAD:refs/heads/${branch}`);
+
+    await git(seed, "checkout", "main");
+    await writeFile(path.join(seed, "main.txt"), "main advanced\n");
+    await git(seed, "add", "main.txt");
+    await git(seed, "commit", "-m", "Advance main");
+    await git(seed, "push", "origin", "main");
+
+    await git(temp, "clone", remote, workspace);
+    await git(workspace, "checkout", branch);
+    await git(workspace, "config", "user.name", "Symphony Worker");
+    await git(workspace, "config", "user.email", "symphony-worker@example.invalid");
+    await git(workspace, "fetch", "origin", "main");
+    await git(workspace, "rebase", "origin/main");
+    await writeFile(path.join(workspace, "followup.txt"), "review feedback addressed\n");
+    await git(workspace, "add", "followup.txt");
+    await git(workspace, "commit", "-m", "Address review feedback");
+    await writeFile(path.join(workspace, "SYMPHONY_PR_READY.json"), "{}\n");
+    const workspaceHead = await gitOut(workspace, "rev-parse", "HEAD");
+
+    const requests: Array<{ method: string; url: string; body: unknown }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push({ method: String(init?.method ?? "GET"), url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (String(init?.method ?? "GET") === "GET") {
+        return jsonResponse([{ number: 42, html_url: "https://github.test/acme/widgets/pull/42", head: { sha: oldRemoteSha } }]);
+      }
+      return jsonResponse({ number: 42, html_url: "https://github.test/acme/widgets/pull/42", head: { sha: workspaceHead } });
+    };
+
+    const cfg = config(temp, remote);
+    const publisher = new GitHubPullRequestPublisher(() => cfg, createLogger(() => undefined), fetchImpl);
+    const published = await publisher.publish({
+      issue: issue({ identifier: "SAM-123", title: "Add publish loop", url: "https://linear.test/SAM-123" }),
+      workspacePath: workspace,
+      manifest: { summary: "Addressed review feedback.", verification: ["pnpm test"], risk: "Low" }
+    });
+
+    expect(published).toMatchObject({ number: 42, created: false, branch });
+    expect(await gitOut(seed, "ls-remote", remote, branch)).toContain(workspaceHead);
+    expect(requests.map((request) => request.method)).toEqual(["GET", "PATCH"]);
+    expect(requests[1]?.body).toMatchObject({ title: "SAM-123: Add publish loop" });
+  });
 });
 
 function config(root: string, remote: string): SymphonyConfig {

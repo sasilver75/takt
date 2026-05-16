@@ -34,12 +34,12 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     if (!Number.isFinite(ahead) || ahead <= 0) {
       throw new SymphonyError("github_no_commits", `Workspace has no commits ahead of ${config.remote}/${config.base_branch}`);
     }
-    await git(input.workspacePath, ["checkout", "-B", branch]);
-    await this.pushBranch(input.workspacePath, branch);
-
     const title = input.manifest.title?.trim() || `${input.issue.identifier}: ${input.issue.title}`;
     const body = renderPullRequestBody(input.issue, input.manifest);
     const existing = await this.findOpenPullRequest(branch);
+    await git(input.workspacePath, ["checkout", "-B", branch]);
+    await this.pushBranch(input.workspacePath, branch, existing?.head_sha ?? null);
+
     const published = existing
       ? await this.updatePullRequest(existing.number, { title, body })
       : await this.createPullRequest({ title, body, branch });
@@ -50,20 +50,29 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
       pr_url: published.url,
       branch
     });
-    return { ...published, branch, title, created: !existing };
+    return { number: published.number, url: published.url, branch, title, created: !existing };
   }
 
-  private async pushBranch(workspacePath: string, branch: string): Promise<void> {
+  private async pushBranch(workspacePath: string, branch: string, expectedRemoteSha: string | null): Promise<void> {
     const config = this.getConfig().github;
     const askpass = config.token ? await createAskpass(config.token) : null;
     try {
-      await git(workspacePath, ["push", config.remote, `HEAD:refs/heads/${branch}`], askpass ? { GIT_ASKPASS: askpass, GIT_TERMINAL_PROMPT: "0" } : {});
+      await git(
+        workspacePath,
+        [
+          "push",
+          ...(expectedRemoteSha ? [`--force-with-lease=refs/heads/${branch}:${expectedRemoteSha}`] : []),
+          config.remote,
+          `HEAD:refs/heads/${branch}`
+        ],
+        askpass ? { GIT_ASKPASS: askpass, GIT_TERMINAL_PROMPT: "0" } : {}
+      );
     } finally {
       if (askpass) await rm(path.dirname(askpass), { recursive: true, force: true });
     }
   }
 
-  private async findOpenPullRequest(branch: string): Promise<{ number: number; url: string } | null> {
+  private async findOpenPullRequest(branch: string): Promise<{ number: number; url: string; head_sha: string | null } | null> {
     const config = this.getConfig().github;
     const head = `${config.owner}:${branch}`;
     const response = await this.api.request("GET", `/repos/${config.owner}/${config.repo}/pulls?state=open&head=${encodeURIComponent(head)}&base=${encodeURIComponent(config.base_branch)}`);
@@ -73,7 +82,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     return readPublished(first);
   }
 
-  private async createPullRequest(input: { title: string; body: string; branch: string }): Promise<{ number: number; url: string }> {
+  private async createPullRequest(input: { title: string; body: string; branch: string }): Promise<{ number: number; url: string; head_sha: string | null }> {
     const config = this.getConfig().github;
     return readPublished(
       await this.api.request("POST", `/repos/${config.owner}/${config.repo}/pulls`, {
@@ -86,7 +95,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     );
   }
 
-  private async updatePullRequest(number: number, input: { title: string; body: string }): Promise<{ number: number; url: string }> {
+  private async updatePullRequest(number: number, input: { title: string; body: string }): Promise<{ number: number; url: string; head_sha: string | null }> {
     const config = this.getConfig().github;
     return readPublished(await this.api.request("PATCH", `/repos/${config.owner}/${config.repo}/pulls/${number}`, input));
   }
@@ -140,13 +149,15 @@ async function createAskpass(token: string): Promise<string> {
   return script;
 }
 
-function readPublished(payload: unknown): { number: number; url: string } {
+function readPublished(payload: unknown): { number: number; url: string; head_sha: string | null } {
   if (!payload || typeof payload !== "object") throw new SymphonyError("github_api_error", "GitHub PR response was not an object");
   const record = payload as Record<string, unknown>;
   const number = typeof record.number === "number" ? record.number : null;
   const url = typeof record.html_url === "string" ? record.html_url : null;
+  const head = record.head && typeof record.head === "object" ? (record.head as Record<string, unknown>) : null;
+  const headSha = typeof head?.sha === "string" ? head.sha : null;
   if (!number || !url) throw new SymphonyError("github_api_error", "GitHub PR response did not include number/html_url");
-  return { number, url };
+  return { number, url, head_sha: headSha };
 }
 
 async function git(cwd: string, args: string[], env: Record<string, string> = {}): Promise<void> {
