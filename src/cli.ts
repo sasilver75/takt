@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { access } from "node:fs/promises";
-import { SymphonyService } from "./service.js";
+import { pathToFileURL } from "node:url";
+import { SymphonyService, type SymphonyServiceOptions } from "./service.js";
 import { selectWorkflowPath } from "./workflow/loader.js";
-import { createLogger } from "./observability/logger.js";
+import { createLogger, type Logger } from "./observability/logger.js";
 import { errorMessage } from "./errors.js";
 
 type CliArgs = {
@@ -10,25 +11,52 @@ type CliArgs = {
   port: number | null;
 };
 
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
-  const workflowPath = selectWorkflowPath(args.workflowPath);
+export type CliService = {
+  start(): Promise<{ http?: { host: string; port: number } }>;
+  stop(): Promise<void>;
+};
+
+export type StartCliOptions = {
+  argv?: string[];
+  cwd?: string;
+  logger?: Logger;
+  serviceFactory?: (options: SymphonyServiceOptions) => CliService;
+  installSignalHandlers?: boolean;
+  stderr?: Pick<NodeJS.WriteStream, "write">;
+};
+
+export async function startCli(options: StartCliOptions = {}): Promise<CliService> {
+  const args = parseCliArgs(options.argv ?? process.argv.slice(2));
+  const workflowPath = selectWorkflowPath(args.workflowPath, options.cwd);
   await access(workflowPath);
-  const logger = createLogger();
-  const service = new SymphonyService({ workflowPath, port: args.port, logger });
+  const logger = options.logger ?? createLogger();
+  const serviceOptions: SymphonyServiceOptions = { workflowPath, port: args.port, logger };
+  const service = options.serviceFactory?.(serviceOptions) ?? new SymphonyService(serviceOptions);
   const started = await service.start();
   if (started.http) {
     logger.info("symphony dashboard available", { url: `http://${started.http.host}:${started.http.port}/` });
   }
-  const shutdown = async () => {
+  if (options.installSignalHandlers === false) return service;
+  const shutdown = async (): Promise<void> => {
     await service.stop();
     process.exit(0);
   };
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
+  return service;
 }
 
-function parseArgs(argv: string[]): CliArgs {
+export async function runCli(options: StartCliOptions = {}): Promise<number> {
+  try {
+    await startCli(options);
+    return 0;
+  } catch (error) {
+    (options.stderr ?? process.stderr).write(`symphony startup failed: ${errorMessage(error)}\n`);
+    return 1;
+  }
+}
+
+export function parseCliArgs(argv: string[]): CliArgs {
   let workflowPath: string | null = null;
   let port: number | null = null;
   for (let index = 0; index < argv.length; index += 1) {
@@ -53,7 +81,8 @@ function parseArgs(argv: string[]): CliArgs {
   return { workflowPath, port };
 }
 
-main().catch((error) => {
-  process.stderr.write(`symphony startup failed: ${errorMessage(error)}\n`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void runCli().then((code) => {
+    if (code !== 0) process.exit(code);
+  });
+}
