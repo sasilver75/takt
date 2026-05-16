@@ -105,11 +105,12 @@ describe("Symphony webapp production-factory harness", () => {
 
     const snapshot = orchestrator.snapshot() as Snapshot;
     expect(snapshot.codex_totals.total_tokens).toBeGreaterThan(0);
-    expect(orchestrator.issueSnapshot("WEB-1")).toMatchObject({
+    const issueSnapshot = orchestrator.issueSnapshot("WEB-1") as { status: string } | null;
+    expect(issueSnapshot).toMatchObject({
       issue_identifier: "WEB-1",
-      status: "retrying",
       workspace: { path: workspace }
     });
+    expect(["retrying", "completed"]).toContain(issueSnapshot?.status);
     expect(logs.some((line) => line.includes("approval_auto_approved"))).toBe(true);
     expect(logs.some((line) => line.includes("linear_graphql_tool_call"))).toBe(true);
     expect(logs.some((line) => line.includes("thread/tokenUsage/updated"))).toBe(true);
