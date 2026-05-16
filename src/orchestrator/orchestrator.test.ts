@@ -988,6 +988,71 @@ describe("orchestrator", () => {
       completed_issue_ids: ["done-1"]
     });
   });
+
+  test("requeues due retries when worker slots are exhausted", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-retry-slots-"));
+    const serverPath = path.join(root, "fake-codex-long-running.mjs");
+    await writeFile(serverPath, fakeLongRunningCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const baseConfig = config(root, `node ${serverPath}`);
+    const cfg = {
+      ...baseConfig,
+      agent: { ...baseConfig.agent, max_concurrent_agents: 1, max_retry_backoff_ms: 1000 }
+    };
+    const retryIssue = issue({ id: "retry-slot", identifier: "SAM-30", state: "Todo", title: "Retry when full", created_at: "2026-01-02T00:00:00.000Z" });
+    const runningIssue = issue({ id: "running-slot", identifier: "SAM-31", state: "Todo", title: "Occupy slot", created_at: "2026-01-01T00:00:00.000Z" });
+    const tracker = new FakeTracker([runningIssue, retryIssue], [], []);
+    const durableStore: DurableStateStore = {
+      async load() {
+        return {
+          schema_version: 1,
+          saved_at: new Date().toISOString(),
+          retry_attempts: [
+            {
+              issue_id: retryIssue.id,
+              identifier: retryIssue.identifier,
+              attempt: 2,
+              due_at_ms: Date.now() + 150,
+              error: "previous failure",
+              context: "continue work"
+            }
+          ],
+          completed_issue_ids: [],
+          issue_history: [],
+          recent_events: [],
+          codex_totals: { input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0 },
+          codex_rate_limits: null
+        };
+      },
+      async save() {
+        return undefined;
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      durableStore,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.start();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { running: number } }).counts.running === 1, "slot occupant dispatch");
+    await waitFor(
+      () =>
+        ((orchestrator.snapshot() as { retrying: Array<{ issue_identifier: string; attempt: number }> }).retrying.find((retry) => retry.issue_identifier === "SAM-30")
+          ?.attempt ?? 0) === 3,
+      "retry requeue after slot exhaustion"
+    );
+
+    expect(orchestrator.snapshot()).toMatchObject({
+      counts: { running: 1, retrying: 1 },
+      retrying: [{ issue_identifier: "SAM-30", attempt: 3, error: "no available orchestrator slots", context: "continue work" }]
+    });
+    await orchestrator.stop();
+  });
 });
 
 function config(root: string, command: string): SymphonyConfig {
@@ -1437,6 +1502,23 @@ rl.on("line", (line) => {
       send({ method: "thread/tokenUsage/updated", params: { threadId: "thread-1", turnId: "turn-1", tokenUsage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 } } });
       send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
     }, 10);
+  }
+});
+`;
+}
+
+function fakeLongRunningCodexServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: {} });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" } } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
+    send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
   }
 });
 `;

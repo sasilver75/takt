@@ -17,7 +17,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Codex app-server JSON-line client | `src/agent/codexClient.ts` | `src/agent/runner.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Configurable Codex launch command | `src/config/config.ts`, `src/runtime/workerRuntime.ts`, `src/agent/codexClient.ts` | `src/workflow/workflow_config.test.ts`, `src/agent/runner.test.ts` |
 | Strict prompt rendering with issue/attempt/follow-up context | `src/workflow/prompt.ts` | `src/workflow/workflow_config.test.ts`, `src/orchestrator/orchestrator.test.ts` |
-| Retry queue, continuation retries, exponential backoff cap | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
+| Retry queue, continuation retries, slot-exhaustion requeue, exponential backoff cap | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
 | Active-run reconciliation and terminal cleanup | `src/orchestrator/orchestrator.ts`, `src/workspace/manager.ts` | `src/orchestrator/orchestrator.test.ts` |
 | Structured issue/session logging and runtime snapshots | `src/observability/logger.ts`, `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Approval/user-input policy does not stall | `src/agent/codexClient.ts`, `docs/OPERATIONS.md` | `src/agent/runner.test.ts`, `src/harness/toyWebappFactory.test.ts` |
