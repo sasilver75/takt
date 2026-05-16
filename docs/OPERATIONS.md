@@ -89,6 +89,8 @@ When the HTTP extension is enabled:
 - `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live runtime-reachable MCP bridge, and was used by a worker. Tracker secret values and MCP bearer tokens are redacted before event payloads are recorded.
 - PR rows include evidence comment links, manifest summaries, and artifact warning counts when a worker writes `github.evidence_file`, so operators can see artifact/app/check/warning counts from the dashboard and `/api/v1/state`. Evidence file auto-publishing is intentionally bounded to workspace-contained paths under `artifacts/`, with a 10 MiB per-file limit.
 
+Workflow front matter can tune retained observability history with `observability.recent_event_limit`, `observability.issue_event_limit`, and `observability.run_attempt_limit`. Defaults are `200`, `50`, and `50`.
+
 ## Real Integration
 
 The deterministic Vitest suite uses fake Linear/local tracker and fake Codex app-server harnesses. `pnpm test:factory` is the highest-signal local check: it copies `examples/toy-webapp` into an isolated workspace, lets a scripted app-server modify backend and frontend TypeScript, handles tool/approval requests, compiles the resulting app, and validates handoff status.

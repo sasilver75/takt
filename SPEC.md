@@ -1293,6 +1293,12 @@ RECOMMENDED snapshot error modes:
 - `timeout`
 - `unavailable`
 
+Optional observability config:
+
+- `observability.recent_event_limit`: positive integer, implementation-defined default
+- `observability.issue_event_limit`: positive integer, implementation-defined default
+- `observability.run_attempt_limit`: positive integer, implementation-defined default
+
 ### 13.4 OPTIONAL Human-Readable Status Surface
 
 A human-readable status surface (terminal output, dashboard, etc.) is OPTIONAL and
@@ -2106,7 +2112,7 @@ Use the same validation profiles as Section 17:
 - GitHub PR lifecycle extension MAY merge PRs only under an implementation-defined, documented
   policy. A safe merge policy SHOULD require the inspected head SHA, successful checks, approving
   review, non-draft PR state, and clean mergeability unless explicitly relaxed by workflow config.
-- TODO: Make observability settings configurable in workflow front matter without prescribing UI
+- Observability settings MAY be configurable in workflow front matter without prescribing UI
   implementation details.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
   of only via agent tools.

@@ -95,6 +95,73 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("trims observability history using workflow limits", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-observe-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      observability: { recent_event_limit: 2, issue_event_limit: 1, run_attempt_limit: 1 }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "body", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker: new FakeTracker([], [], []),
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      logger: createLogger(() => undefined)
+    });
+    orchestrator.state.recent_events.push(
+      { at: "2026-01-01T00:00:00.000Z", event: "one", issue_identifier: "SAM-80" },
+      { at: "2026-01-01T00:00:01.000Z", event: "two", issue_identifier: "SAM-80" },
+      { at: "2026-01-01T00:00:02.000Z", event: "three", issue_identifier: "SAM-80" }
+    );
+    orchestrator.state.issue_history.set("SAM-80", {
+      issue_id: "i-observe",
+      issue_identifier: "SAM-80",
+      workspace_path: null,
+      restart_count: 0,
+      last_error: null,
+      run_attempts: [
+        {
+          attempt: null,
+          status: "succeeded",
+          started_at: "2026-01-01T00:00:00.000Z",
+          finished_at: "2026-01-01T00:00:01.000Z",
+          runtime_seconds: 1,
+          workspace_path: "/tmp/old",
+          session_id: "old-session",
+          turn_count: 1,
+          error: null,
+          followup: false
+        },
+        {
+          attempt: 1,
+          status: "failed",
+          started_at: "2026-01-01T00:00:02.000Z",
+          finished_at: "2026-01-01T00:00:03.000Z",
+          runtime_seconds: 1,
+          workspace_path: "/tmp/new",
+          session_id: "new-session",
+          turn_count: 2,
+          error: "failed",
+          followup: true
+        }
+      ],
+      recent_events: [
+        { at: "2026-01-01T00:00:01.000Z", event: "issue-two", issue_identifier: "SAM-80" },
+        { at: "2026-01-01T00:00:02.000Z", event: "issue-three", issue_identifier: "SAM-80" }
+      ],
+      tracked: {}
+    });
+
+    orchestrator.notifyConfigReload(cfg);
+
+    expect((orchestrator.snapshot() as { recent_events: Array<{ event: string }> }).recent_events.map((event) => event.event)).toEqual(["two", "three"]);
+    expect(orchestrator.issueSnapshot("SAM-80")).toMatchObject({
+      attempts: { run_attempts: [{ attempt: 1, status: "failed", session_id: "new-session" }] },
+      recent_events: [{ event: "issue-three" }]
+    });
+  });
+
   test("claims an issue, publishes PR-ready worker commits, comments, and moves to review", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
@@ -1124,6 +1191,14 @@ describe("orchestrator", () => {
     expect(orchestrator.issueSnapshot("SAM-12")).toMatchObject({
       status: "retrying",
       last_error: "verify failed",
+      attempts: {
+        run_attempts: [
+          {
+            status: "failed",
+            error: "orchestrator restarted before worker completion"
+          }
+        ]
+      },
       tracked: { github_pull_request: { number: 12 } }
     });
     await orchestrator.stop();
@@ -1229,6 +1304,7 @@ function config(root: string, command: string): SymphonyConfig {
       stall_timeout_ms: 0,
       linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
+    observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
   };
 }
@@ -1607,7 +1683,20 @@ function durableSnapshot(dueAtMs: number): DurableStateSnapshot {
         workspace_path: null,
         restart_count: 1,
         last_error: "verify failed",
-        run_attempts: [],
+        run_attempts: [
+          {
+            attempt: 2,
+            status: "running",
+            started_at: "2026-01-01T00:00:00.000Z",
+            finished_at: null,
+            runtime_seconds: null,
+            workspace_path: "/tmp/workspaces/SAM-12",
+            session_id: "interrupted-session",
+            turn_count: 3,
+            error: null,
+            followup: true
+          }
+        ],
         recent_events: [],
         tracked: {
           github_pull_request: {

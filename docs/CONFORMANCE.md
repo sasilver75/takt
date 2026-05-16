@@ -19,7 +19,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Strict prompt rendering with issue/attempt/follow-up context | `src/workflow/prompt.ts` | `src/workflow/workflow_config.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Retry queue, continuation retries, slot-exhaustion requeue, exponential backoff cap | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
 | Active-run reconciliation and terminal cleanup | `src/orchestrator/orchestrator.ts`, `src/workspace/manager.ts` | `src/orchestrator/orchestrator.test.ts` |
-| Structured issue/session logging, token/rate-limit accounting, runtime snapshots, and bounded per-issue run-attempt history | `src/observability/logger.ts`, `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts`, `src/harness/toyWebappFactory.test.ts` |
+| Structured issue/session logging, token/rate-limit accounting, runtime snapshots, and configurable bounded per-issue run-attempt history | `src/observability/logger.ts`, `src/config/config.ts`, `src/orchestrator/orchestrator.ts` | `src/workflow/workflow_config.test.ts`, `src/orchestrator/orchestrator.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | Approval/user-input policy does not stall | `src/agent/codexClient.ts`, `docs/OPERATIONS.md` | `src/agent/runner.test.ts`, `src/harness/toyWebappFactory.test.ts` |
 | CLI workflow path, port override, reconcile-once mode, and startup failure surfacing | `src/cli.ts`, `src/service.ts` | `src/cli.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 

@@ -73,6 +73,10 @@ codex:
   turn_timeout_ms: 3600000
   read_timeout_ms: 5000
   stall_timeout_ms: 300000
+observability:
+  recent_event_limit: 200
+  issue_event_limit: 50
+  run_attempt_limit: 50
 server:
   port: 8787
 ---

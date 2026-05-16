@@ -21,7 +21,7 @@ export class JsonDurableStateStore implements DurableStateStore {
       return null;
     }
     try {
-      return normalizeSnapshot(JSON.parse(raw) as unknown);
+      return normalizeSnapshot(JSON.parse(raw) as unknown, this.getConfig().observability);
     } catch (error) {
       this.logger.warn("durable state parse failed", { path: filePath, error: errorMessage(error) });
       return null;
@@ -42,7 +42,7 @@ export class JsonDurableStateStore implements DurableStateStore {
   }
 }
 
-function normalizeSnapshot(value: unknown): DurableStateSnapshot {
+function normalizeSnapshot(value: unknown, observability: SymphonyConfig["observability"]): DurableStateSnapshot {
   if (!value || typeof value !== "object") throw new Error("state snapshot must be an object");
   const record = value as Record<string, unknown>;
   if (record.schema_version !== 1) throw new Error(`unsupported durable state schema_version: ${String(record.schema_version)}`);
@@ -51,8 +51,13 @@ function normalizeSnapshot(value: unknown): DurableStateSnapshot {
     saved_at: stringOrNow(record.saved_at),
     retry_attempts: array(record.retry_attempts).map((entry) => normalizeRetry(entry)).filter((entry): entry is NonNullable<ReturnType<typeof normalizeRetry>> => Boolean(entry)),
     completed_issue_ids: array(record.completed_issue_ids).filter((entry): entry is string => typeof entry === "string"),
-    issue_history: array(record.issue_history).map((entry) => normalizeIssueRecord(entry)).filter((entry): entry is IssueDebugRecord => Boolean(entry)),
-    recent_events: array(record.recent_events).map((entry) => normalizeEvent(entry)).filter((entry): entry is RuntimeEvent => Boolean(entry)),
+    issue_history: array(record.issue_history)
+      .map((entry) => normalizeIssueRecord(entry, observability))
+      .filter((entry): entry is IssueDebugRecord => Boolean(entry)),
+    recent_events: array(record.recent_events)
+      .map((entry) => normalizeEvent(entry))
+      .filter((entry): entry is RuntimeEvent => Boolean(entry))
+      .slice(-observability.recent_event_limit),
     codex_totals: normalizeCodexTotals(record.codex_totals),
     codex_rate_limits: record.codex_rate_limits ?? null
   };
@@ -76,7 +81,7 @@ function normalizeRetry(value: unknown): DurableStateSnapshot["retry_attempts"][
   };
 }
 
-function normalizeIssueRecord(value: unknown): IssueDebugRecord | null {
+function normalizeIssueRecord(value: unknown, observability: SymphonyConfig["observability"]): IssueDebugRecord | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const issueId = stringOrNull(record.issue_id);
@@ -89,8 +94,14 @@ function normalizeIssueRecord(value: unknown): IssueDebugRecord | null {
     workspace_path: stringOrNull(record.workspace_path),
     restart_count: nonNegativeInteger(record.restart_count),
     last_error: stringOrNull(record.last_error),
-    run_attempts: array(record.run_attempts).map((entry) => normalizeRunAttempt(entry)).filter((entry): entry is RunAttemptRecord => Boolean(entry)).slice(-50),
-    recent_events: array(record.recent_events).map((entry) => normalizeEvent(entry)).filter((entry): entry is RuntimeEvent => Boolean(entry)),
+    run_attempts: array(record.run_attempts)
+      .map((entry) => normalizeRunAttempt(entry))
+      .filter((entry): entry is RunAttemptRecord => Boolean(entry))
+      .slice(-observability.run_attempt_limit),
+    recent_events: array(record.recent_events)
+      .map((entry) => normalizeEvent(entry))
+      .filter((entry): entry is RuntimeEvent => Boolean(entry))
+      .slice(-observability.issue_event_limit),
     tracked
   };
 }

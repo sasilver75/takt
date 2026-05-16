@@ -41,7 +41,7 @@ describe("workflow loader and config", () => {
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(
       workflowPath,
-      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\n  claim_state: In Progress\n  review_state: Needs Human\ngithub:\n  enabled: true\n  owner: acme\n  repo: widgets\n  token: $GITHUB_TOKEN\n  merge:\n    enabled: true\n    method: rebase\n    delete_branch: false\n    complete_state: Done\nworkspace:\n  root: workspaces\nruntime:\n  kind: docker\n  docker:\n    image: symphony-codex-worker:test\n    codex_home: $CODEX_HOME_TEST\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\n---\nbody`
+      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\n  claim_state: In Progress\n  review_state: Needs Human\ngithub:\n  enabled: true\n  owner: acme\n  repo: widgets\n  token: $GITHUB_TOKEN\n  merge:\n    enabled: true\n    method: rebase\n    delete_branch: false\n    complete_state: Done\nworkspace:\n  root: workspaces\nruntime:\n  kind: docker\n  docker:\n    image: symphony-codex-worker:test\n    codex_home: $CODEX_HOME_TEST\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\nobservability:\n  recent_event_limit: 123\n  issue_event_limit: 17\n  run_attempt_limit: 9\n---\nbody`
     );
     const config = resolveConfig(await loadWorkflow(workflowPath), {
       LINEAR_TOKEN: "secret",
@@ -65,6 +65,7 @@ describe("workflow loader and config", () => {
     expect(config.workspace.root).toBe(path.join(dir, "workspaces"));
     expect(config.agent.max_concurrent_agents_by_state).toEqual({ todo: 2 });
     expect(config.codex.command).toBe("codex app-server --flag");
+    expect(config.observability).toEqual({ recent_event_limit: 123, issue_event_limit: 17, run_attempt_limit: 9 });
     expect(config.runtime).toMatchObject({
       kind: "docker",
       docker: {
@@ -129,5 +130,14 @@ describe("workflow loader and config", () => {
     );
     const config = resolveConfig(await loadWorkflow(workflowPath), { TOKEN: "secret" });
     expect(() => validateDispatchConfig(config)).toThrow(/claim_state must also be listed/);
+  });
+
+  test("observability retention limits must be positive integers", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(workflowPath, "---\ntracker:\n  kind: linear\n  api_key: $TOKEN\n  project_slug: demo\nobservability:\n  run_attempt_limit: 0\n---\nbody");
+    const workflow = await loadWorkflow(workflowPath);
+
+    expect(() => resolveConfig(workflow, { TOKEN: "secret" })).toThrow(/run_attempt_limit must be a positive integer/);
   });
 });

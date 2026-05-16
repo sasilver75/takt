@@ -98,6 +98,7 @@ export class Orchestrator {
   notifyConfigReload(config: SymphonyConfig): void {
     this.state.poll_interval_ms = config.polling.interval_ms;
     this.state.max_concurrent_agents = config.agent.max_concurrent_agents;
+    this.trimObservabilityState(config);
   }
 
   queueImmediateTick(): { queued: boolean; coalesced: boolean } {
@@ -153,6 +154,7 @@ export class Orchestrator {
 
   snapshot(): unknown {
     const now = Date.now();
+    const config = this.options.getConfig();
     const running = [...this.state.running.entries()].map(([issueId, entry]) => ({
       issue_id: issueId,
       issue_identifier: entry.identifier,
@@ -197,7 +199,7 @@ export class Orchestrator {
       running,
       retrying,
       pull_requests: pullRequests,
-      recent_events: this.state.recent_events.slice(-200),
+      recent_events: this.state.recent_events.slice(-config.observability.recent_event_limit),
       codex_totals: {
         ...this.state.codex_totals,
         seconds_running: this.state.codex_totals.seconds_running + activeSeconds
@@ -207,6 +209,7 @@ export class Orchestrator {
   }
 
   issueSnapshot(identifier: string): unknown | null {
+    const config = this.options.getConfig();
     const running = [...this.state.running.values()].find((entry) => entry.identifier === identifier);
     const retry = [...this.state.retry_attempts.values()].find((entry) => entry.identifier === identifier) ?? null;
     const record = this.state.issue_history.get(identifier);
@@ -239,7 +242,7 @@ export class Orchestrator {
         : null,
       retry,
       logs: { codex_session_logs: [] },
-      recent_events: record?.recent_events ?? [],
+      recent_events: record?.recent_events.slice(-config.observability.issue_event_limit) ?? [],
       last_error: record?.last_error ?? null,
       tracked: record?.tracked ?? {}
     };
@@ -274,11 +277,13 @@ export class Orchestrator {
     if (!this.options.durableStore) return;
     const snapshot = await this.options.durableStore.load();
     if (!snapshot) return;
+    const config = this.options.getConfig();
     this.state.completed = new Set(snapshot.completed_issue_ids);
     this.state.codex_totals = snapshot.codex_totals;
     this.state.codex_rate_limits = snapshot.codex_rate_limits;
-    this.state.recent_events = snapshot.recent_events.slice(-200);
-    this.state.issue_history = new Map(snapshot.issue_history.map((record) => [record.issue_identifier, record]));
+    this.state.recent_events = snapshot.recent_events.slice(-config.observability.recent_event_limit);
+    const restoredAt = new Date().toISOString();
+    this.state.issue_history = new Map(snapshot.issue_history.map((record) => [record.issue_identifier, this.trimIssueRecord(this.markInterruptedAttempts(record, restoredAt), config)]));
     for (const retry of snapshot.retry_attempts) {
       if (this.state.completed.has(retry.issue_id)) continue;
       const delay = Math.max(retry.due_at_ms - Date.now(), 0);
@@ -1106,7 +1111,7 @@ export class Orchestrator {
       error: null,
       followup: Boolean(followupContext)
     });
-    trimRunAttempts(record);
+    this.trimIssueRecord(record);
   }
 
   private finishRunAttempt(
@@ -1129,17 +1134,39 @@ export class Orchestrator {
     };
     if (attempt) Object.assign(attempt, updated);
     else record.run_attempts.push(updated);
-    trimRunAttempts(record);
+    this.trimIssueRecord(record);
+  }
+
+  private trimObservabilityState(config: SymphonyConfig = this.options.getConfig()): void {
+    trimArray(this.state.recent_events, config.observability.recent_event_limit);
+    for (const record of this.state.issue_history.values()) this.trimIssueRecord(record, config);
+  }
+
+  private trimIssueRecord(record: IssueDebugRecord, config: SymphonyConfig = this.options.getConfig()): IssueDebugRecord {
+    trimArray(record.recent_events, config.observability.issue_event_limit);
+    trimArray(record.run_attempts, config.observability.run_attempt_limit);
+    return record;
+  }
+
+  private markInterruptedAttempts(record: IssueDebugRecord, restoredAt: string): IssueDebugRecord {
+    for (const attempt of record.run_attempts) {
+      if (attempt.status !== "running") continue;
+      attempt.status = "failed";
+      attempt.finished_at = attempt.finished_at ?? restoredAt;
+      attempt.error = attempt.error ?? "orchestrator restarted before worker completion";
+    }
+    return record;
   }
 
   private recordEvent(event: RuntimeEvent): void {
+    const config = this.options.getConfig();
     this.state.recent_events.push(event);
-    if (this.state.recent_events.length > 200) this.state.recent_events.splice(0, this.state.recent_events.length - 200);
+    trimArray(this.state.recent_events, config.observability.recent_event_limit);
     if (event.issue_identifier) {
       const record = this.state.issue_history.get(event.issue_identifier);
       if (record) {
         record.recent_events.push(event);
-        if (record.recent_events.length > 50) record.recent_events.splice(0, record.recent_events.length - 50);
+        this.trimIssueRecord(record, config);
       }
     }
     this.options.logger.info(event.event, {
@@ -1168,6 +1195,8 @@ export class Orchestrator {
   }
 
   private durableSnapshot(): DurableStateSnapshot {
+    const config = this.options.getConfig();
+    this.trimObservabilityState(config);
     return {
       schema_version: 1,
       saved_at: new Date().toISOString(),
@@ -1181,7 +1210,7 @@ export class Orchestrator {
       })),
       completed_issue_ids: [...this.state.completed],
       issue_history: [...this.state.issue_history.values()],
-      recent_events: this.state.recent_events.slice(-200),
+      recent_events: this.state.recent_events.slice(-config.observability.recent_event_limit),
       codex_totals: this.state.codex_totals,
       codex_rate_limits: this.state.codex_rate_limits
     };
@@ -1204,8 +1233,8 @@ function nextAttempt(current: number | null): number {
   return current === null ? 1 : current + 1;
 }
 
-function trimRunAttempts(record: IssueDebugRecord): void {
-  if (record.run_attempts.length > 50) record.run_attempts.splice(0, record.run_attempts.length - 50);
+function trimArray<T>(values: T[], limit: number): void {
+  if (values.length > limit) values.splice(0, values.length - limit);
 }
 
 async function readPrReadyManifest(workspacePath: string, fileName: string): Promise<PrReadyManifest | null> {

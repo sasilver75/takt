@@ -235,6 +235,7 @@ function config(root: string, remote: string): SymphonyConfig {
       stall_timeout_ms: 0,
       linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
     },
+    observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
   };
 }

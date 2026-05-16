@@ -25,6 +25,7 @@ export function resolveConfig(
   const agent = objectAt(root, "agent");
   const codex = objectAt(root, "codex");
   const linearGraphqlMcp = objectAt(codex, "linear_graphql_mcp");
+  const observability = objectAt(root, "observability");
   const server = objectAt(root, "server");
   const workflowDir = path.dirname(workflow.path);
   const trackerKind = stringAt(tracker, "kind") ?? "linear";
@@ -96,6 +97,11 @@ export function resolveConfig(
         enabled: booleanAt(linearGraphqlMcp, "enabled", true),
         server_name: mcpServerNameAt(linearGraphqlMcp, "server_name", "symphony_linear")
       }
+    },
+    observability: {
+      recent_event_limit: positiveIntegerAt(observability, "recent_event_limit", 200),
+      issue_event_limit: positiveIntegerAt(observability, "issue_event_limit", 50),
+      run_attempt_limit: positiveIntegerAt(observability, "run_attempt_limit", 50)
     },
     server: {
       port: overrides.port ?? optionalIntegerAt(server, "port"),

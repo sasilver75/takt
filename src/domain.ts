@@ -86,6 +86,11 @@ export type SymphonyConfig = {
       server_name: string;
     };
   };
+  observability: {
+    recent_event_limit: number;
+    issue_event_limit: number;
+    run_attempt_limit: number;
+  };
   server: {
     port: number | null;
     host: string;
