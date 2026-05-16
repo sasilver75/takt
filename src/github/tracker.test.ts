@@ -2,7 +2,7 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 import type { SymphonyConfig } from "../domain.js";
 import { createLogger } from "../observability/logger.js";
-import { classifyCheckRuns, classifyReviews, GitHubPullRequestTracker } from "./tracker.js";
+import { classifyCheckRuns, classifyReviews, GitHubPullRequestTracker, inferIssueIdentifier } from "./tracker.js";
 
 describe("GitHub PR tracker", () => {
   test("classifies failing checks and requested changes with review context", async () => {
@@ -92,6 +92,46 @@ describe("GitHub PR tracker", () => {
       ])
     ).toBe("changes_requested");
     expect(classifyReviews([])).toBe("review_required");
+  });
+
+  test("discovers open Symphony pull requests and infers Linear issue identifiers", async () => {
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (url) => {
+      requests.push(String(url));
+      if (String(url).includes("/pulls?state=open")) {
+        return jsonResponse([
+          {
+            number: 8,
+            html_url: "https://github.test/acme/widgets/pull/8",
+            title: "SAM-8: Recover after restart",
+            body: "Linear: SAM-8",
+            head: { ref: "symphony/sam-8-recover-after-restart" }
+          },
+          {
+            number: 9,
+            html_url: "https://github.test/acme/widgets/pull/9",
+            title: "Other branch",
+            head: { ref: "feature/other" }
+          }
+        ]);
+      }
+      return jsonResponse({ message: "not found" }, 404);
+    };
+    const tracker = new GitHubPullRequestTracker(() => config("/tmp/symphony-gh-discover"), createLogger(() => undefined), fetchImpl);
+
+    await expect(tracker.discoverOpen()).resolves.toEqual([
+      {
+        number: 8,
+        url: "https://github.test/acme/widgets/pull/8",
+        branch: "symphony/sam-8-recover-after-restart",
+        title: "SAM-8: Recover after restart",
+        created: false,
+        issue_identifier: "SAM-8"
+      }
+    ]);
+    expect(requests[0]).toContain("state=open");
+    expect(requests[0]).toContain("base=main");
+    expect(inferIssueIdentifier({ title: "fallback" }, "symphony/abc-12-title", "symphony/")).toBe("ABC-12");
   });
 });
 

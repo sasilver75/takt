@@ -162,6 +162,7 @@ export type TrackerClient = {
   fetchCandidateIssues(): Promise<Issue[]>;
   fetchIssuesByStates(stateNames: string[]): Promise<Issue[]>;
   fetchIssueStatesByIds(issueIds: string[]): Promise<Issue[]>;
+  fetchIssuesByIdentifiers?(identifiers: string[]): Promise<Issue[]>;
   transitionIssue?(issue: Issue, stateName: string): Promise<Issue>;
   commentOnIssue?(issue: Issue, body: string): Promise<void>;
 };
@@ -184,6 +185,10 @@ export type PublishedPullRequest = {
   branch: string;
   title: string;
   created: boolean;
+};
+
+export type DiscoveredPullRequest = PublishedPullRequest & {
+  issue_identifier: string;
 };
 
 export type PullRequestPublisher = {
@@ -237,6 +242,7 @@ export type PullRequestInspection = {
 
 export type PullRequestTracker = {
   inspect(input: PublishedPullRequest): Promise<PullRequestInspection>;
+  discoverOpen?(): Promise<DiscoveredPullRequest[]>;
 };
 
 export type RunningEntry = {

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   CodexRuntimeEvent,
+  DiscoveredPullRequest,
   Issue,
   IssueDebugRecord,
   GraphqlToolExecutor,
@@ -96,6 +97,7 @@ export class Orchestrator {
     try {
       this.notifyConfigReload(this.options.getConfig());
       await this.reconcileRunningIssues();
+      await this.recoverPullRequests();
       await this.reconcilePullRequests();
       try {
         await this.options.validateDispatch();
@@ -255,6 +257,81 @@ export class Orchestrator {
         await this.terminateRunning(issueId, "non-active tracker state", false);
       }
     }
+  }
+
+  private async recoverPullRequests(): Promise<void> {
+    if (!this.options.getConfig().github.enabled || !this.options.pullRequestTracker?.discoverOpen) return;
+    let discovered: DiscoveredPullRequest[];
+    try {
+      discovered = await this.options.pullRequestTracker.discoverOpen();
+    } catch (error) {
+      this.options.logger.warn("github pr discovery failed", { error: errorMessage(error) });
+      return;
+    }
+    const unknown = discovered.filter((pr) => !this.hasTrackedPullRequest(pr.number));
+    if (unknown.length === 0) return;
+    const issues = await this.fetchIssuesForDiscoveredPullRequests(unknown);
+    const byIdentifier = new Map(issues.map((issue) => [issue.identifier.toUpperCase(), issue]));
+    for (const pullRequest of unknown) {
+      const issue = byIdentifier.get(pullRequest.issue_identifier.toUpperCase());
+      if (!issue) {
+        this.recordEvent({
+          at: new Date().toISOString(),
+          event: "pull_request_recovery_skipped",
+          issue_identifier: pullRequest.issue_identifier,
+          message: `No tracker issue found for ${pullRequest.url}`
+        });
+        continue;
+      }
+      const record = this.ensureRecord(issue);
+      if (readTrackedPullRequest(record.tracked.github_pull_request)) continue;
+      record.workspace_path = this.options.workspaceManager.workspacePath(issue.identifier);
+      record.tracked.github_pull_request = pullRequest;
+      record.tracked.github_pr_recovered = true;
+      record.tracked.github_pr_recovered_at = new Date().toISOString();
+      this.state.completed.add(issue.id);
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_recovered",
+        issue_id: issue.id,
+        issue_identifier: issue.identifier,
+        message: pullRequest.url
+      });
+    }
+  }
+
+  private async fetchIssuesForDiscoveredPullRequests(pullRequests: DiscoveredPullRequest[]): Promise<Issue[]> {
+    const identifiers = [...new Set(pullRequests.map((pr) => pr.issue_identifier))];
+    if (this.options.tracker.fetchIssuesByIdentifiers) {
+      try {
+        return await this.options.tracker.fetchIssuesByIdentifiers(identifiers);
+      } catch (error) {
+        this.options.logger.warn("tracker identifier fetch failed", { error: errorMessage(error) });
+      }
+    }
+    const states = new Set<string>([
+      ...this.options.getConfig().tracker.active_states,
+      ...this.options.getConfig().tracker.terminal_states,
+      this.options.getConfig().tracker.claim_state ?? "",
+      this.options.getConfig().tracker.review_state ?? ""
+    ].filter(Boolean));
+    if (states.size === 0) return [];
+    try {
+      const issues = await this.options.tracker.fetchIssuesByStates([...states]);
+      const wanted = new Set(identifiers.map((identifier) => identifier.toUpperCase()));
+      return issues.filter((issue) => wanted.has(issue.identifier.toUpperCase()));
+    } catch (error) {
+      this.options.logger.warn("tracker recovery state fetch failed", { error: errorMessage(error) });
+      return [];
+    }
+  }
+
+  private hasTrackedPullRequest(number: number): boolean {
+    for (const record of this.state.issue_history.values()) {
+      const tracked = readTrackedPullRequest(record.tracked.github_pull_request);
+      if (tracked?.number === number) return true;
+    }
+    return false;
   }
 
   private async reconcilePullRequests(): Promise<void> {

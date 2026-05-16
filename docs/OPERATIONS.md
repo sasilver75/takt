@@ -54,6 +54,7 @@ When `github.enabled: true`, the issue-to-PR loop is:
 
 After a PR is published, Symphony owns the PR lifecycle reconciliation loop:
 
+- On every poll, Symphony discovers open PRs whose head branch starts with `github.branch_prefix`, infers the Linear issue identifier from the PR title/body/branch, and reconnects them to tracker issues. This lets a restarted orchestrator resume monitoring already-open Symphony PRs without a durable database.
 - It inspects the GitHub PR, latest head checks, reviews, and inline review comments on each poll tick.
 - Pending checks, passing checks, and review-required states stay in the human-review lane.
 - Merged or closed PRs are recorded as terminal PR states in the issue debug record.

@@ -21,6 +21,11 @@ export class LocalTracker implements TrackerClient, GraphqlToolExecutor {
     return issueIds.map((id) => this.issues.get(id)).filter((issue): issue is Issue => Boolean(issue));
   }
 
+  async fetchIssuesByIdentifiers(identifiers: string[]): Promise<Issue[]> {
+    const wanted = new Set(identifiers.map((identifier) => identifier.toUpperCase()));
+    return [...this.issues.values()].filter((issue) => wanted.has(issue.identifier.toUpperCase()));
+  }
+
   async executeGraphql(query: string, variables: Record<string, unknown> = {}): Promise<{ success: boolean; body?: unknown; error?: string }> {
     if (!query.includes("issueUpdate")) {
       return { success: false, error: "LocalTracker only supports issueUpdate in deterministic harness mode" };

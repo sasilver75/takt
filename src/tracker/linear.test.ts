@@ -77,17 +77,27 @@ describe("linear tracker", () => {
     expect(requests[1]?.variables.after).toBe("cursor");
   });
 
-  test("empty state fetch returns without API call and ID refresh query uses GraphQL ID typing", async () => {
-    let called = false;
+  test("empty state fetch returns without API call, ID refresh uses ID typing, and identifier recovery queries project", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
     const client = new LinearTrackerClient(config, (async (_url: string | URL | Request, init?: RequestInit) => {
-      called = true;
-      const request = JSON.parse(String(init?.body)) as { query: string };
-      expect(request.query).toContain("$ids: [ID!]");
+      const request = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+      requests.push(request);
+      if (request.query.includes("SymphonyIssueStates")) expect(request.query).toContain("$ids: [ID!]");
+      if (request.query.includes("SymphonyIssuesByIdentifiers")) {
+        expect(request.query).toContain("identifier");
+        expect(request.query).toContain("slugId");
+        return new Response(
+          JSON.stringify({ data: { issues: { nodes: [rawIssue()], pageInfo: { hasNextPage: false, endCursor: null } } } }),
+          { status: 200 }
+        );
+      }
       return new Response(JSON.stringify({ data: { issues: { nodes: [rawIssue()] } } }), { status: 200 });
     }) as typeof fetch);
     await expect(client.fetchIssuesByStates([])).resolves.toEqual([]);
-    expect(called).toBe(false);
+    expect(requests).toHaveLength(0);
     await expect(client.fetchIssueStatesByIds(["id-1"])).resolves.toHaveLength(1);
+    await expect(client.fetchIssuesByIdentifiers(["ABC-1"])).resolves.toHaveLength(1);
+    expect(requests[1]?.variables).toMatchObject({ projectSlug: "demo", identifiers: ["ABC-1"], after: null });
   });
 
   test("normalizes labels, blockers, priority, and timestamps", () => {

@@ -1,4 +1,5 @@
 import type {
+  DiscoveredPullRequest,
   PublishedPullRequest,
   PullRequestCheckSummary,
   PullRequestChecksStatus,
@@ -66,6 +67,34 @@ export class GitHubPullRequestTracker implements PullRequestTracker {
     return inspection;
   }
 
+  async discoverOpen(): Promise<DiscoveredPullRequest[]> {
+    const config = this.getConfig().github;
+    if (!config.owner || !config.repo) throw new SymphonyError("github_not_configured", "GitHub owner/repo are required for PR discovery");
+    const branchPrefix = `${config.branch_prefix.replace(/\/+$/g, "")}/`;
+    const discovered: DiscoveredPullRequest[] = [];
+    for (let page = 1; ; page += 1) {
+      const payload = await this.api.request<unknown[]>(
+        "GET",
+        `/repos/${config.owner}/${config.repo}/pulls?state=open&base=${encodeURIComponent(config.base_branch)}&per_page=100&page=${page}`
+      );
+      const pulls = Array.isArray(payload) ? payload.filter((pr): pr is Record<string, unknown> => Boolean(pr) && typeof pr === "object") : [];
+      for (const pr of pulls) {
+        const branch = readNestedString(pr, ["head", "ref"]);
+        if (!branch?.startsWith(branchPrefix)) continue;
+        const issueIdentifier = inferIssueIdentifier(pr, branch, branchPrefix);
+        if (!issueIdentifier) continue;
+        const number = readNumber(pr.number, 0);
+        const url = readString(pr.html_url);
+        const title = readString(pr.title);
+        if (!number || !url || !title) continue;
+        discovered.push({ number, url, branch, title, created: false, issue_identifier: issueIdentifier });
+      }
+      if (pulls.length < 100) break;
+    }
+    this.logger.info("github prs discovered", { count: discovered.length, branch_prefix: branchPrefix });
+    return discovered;
+  }
+
   private async inspectChecks(headSha: string): Promise<PullRequestCheckSummary[]> {
     const config = this.getConfig().github;
     const checkRunsPayload = await this.api.request<Record<string, unknown>>("GET", `/repos/${config.owner}/${config.repo}/commits/${encodeURIComponent(headSha)}/check-runs?per_page=100`);
@@ -78,10 +107,10 @@ export class GitHubPullRequestTracker implements PullRequestTracker {
       : [];
     return [
       ...runs.map((run) => ({
-      name: readString(run.name) ?? "unnamed check",
-      status: readString(run.status),
-      conclusion: readString(run.conclusion),
-      details_url: readString(run.details_url) ?? readString(run.html_url)
+        name: readString(run.name) ?? "unnamed check",
+        status: readString(run.status),
+        conclusion: readString(run.conclusion),
+        details_url: readString(run.details_url) ?? readString(run.html_url)
       })),
       ...statuses.map(readCommitStatusSummary)
     ];
@@ -167,6 +196,20 @@ function readCommitStatusSummary(status: Record<string, unknown>): PullRequestCh
     conclusion,
     details_url: readString(status.target_url)
   };
+}
+
+export function inferIssueIdentifier(pr: Record<string, unknown>, branch: string, branchPrefix: string): string | null {
+  const title = readString(pr.title);
+  const body = readString(pr.body);
+  for (const candidate of [title, body]) {
+    const match = candidate?.match(/\b([A-Z][A-Z0-9]+-\d+)\b/i);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+  if (!branch.startsWith(branchPrefix)) return null;
+  const slug = branch.slice(branchPrefix.length);
+  const branchMatch = /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/i.exec(slug);
+  if (!branchMatch?.[1] || !branchMatch[2]) return null;
+  return `${branchMatch[1].toUpperCase()}-${branchMatch[2]}`;
 }
 
 function readLifecycleState(pr: Record<string, unknown>): PullRequestInspection["state"] {

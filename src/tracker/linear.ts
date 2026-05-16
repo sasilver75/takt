@@ -91,6 +91,38 @@ export class LinearTrackerClient implements TrackerClient {
     return nodes.map(normalizeIssue);
   }
 
+  async fetchIssuesByIdentifiers(identifiers: string[]): Promise<Issue[]> {
+    if (identifiers.length === 0) return [];
+    const query = `
+      query SymphonyIssuesByIdentifiers($projectSlug: String!, $identifiers: [String!], $after: String) {
+        issues(
+          first: 50
+          after: $after
+          filter: { project: { slugId: { eq: $projectSlug } }, identifier: { in: $identifiers } }
+          orderBy: createdAt
+        ) {
+          nodes { ${ISSUE_FIELDS} }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    `;
+    const all: Issue[] = [];
+    let after: string | null = null;
+    for (;;) {
+      const body = await this.graphql(query, {
+        projectSlug: this.getConfig().tracker.project_slug,
+        identifiers,
+        after
+      });
+      const page = readConnection(body, ["data", "issues"]);
+      all.push(...page.nodes.map(normalizeIssue));
+      if (!page.hasNextPage) break;
+      if (!page.endCursor) throw new SymphonyError("linear_missing_end_cursor", "Linear pagination reported next page without endCursor");
+      after = page.endCursor;
+    }
+    return all;
+  }
+
   async executeGraphql(query: string, variables: Record<string, unknown> = {}): Promise<{ success: boolean; body?: unknown; error?: string }> {
     try {
       validateSingleOperation(query);

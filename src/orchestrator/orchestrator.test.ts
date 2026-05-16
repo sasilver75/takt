@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import type { PullRequestInspection, PullRequestPublisher, PullRequestTracker, SymphonyConfig } from "../domain.js";
+import type { DiscoveredPullRequest, PullRequestInspection, PullRequestPublisher, PullRequestTracker, SymphonyConfig } from "../domain.js";
 import { createLogger } from "../observability/logger.js";
 import { FakeTracker, issue } from "../testing/fakes.js";
 import { LocalTracker } from "../testing/localTracker.js";
@@ -185,6 +185,58 @@ describe("orchestrator", () => {
     });
     await orchestrator.stop();
   });
+
+  test("recovers open Symphony PRs after restart and suppresses duplicate dispatch", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-recover-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      tracker: {
+        ...config(root, "node missing.js").tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-recover", identifier: "SAM-11", state: "Todo", title: "Recovered PR should not redispatch" });
+    const tracker = new LocalTracker([activeIssue]);
+    const pullRequestTracker: PullRequestTracker = {
+      async discoverOpen() {
+        return [discoveredPullRequest()];
+      },
+      async inspect() {
+        return healthyInspection();
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+
+    const snapshot = orchestrator.snapshot() as { counts: { running: number; completed: number; pull_requests: number } };
+    expect(snapshot.counts).toMatchObject({ running: 0, completed: 1, pull_requests: 1 });
+    expect(orchestrator.issueSnapshot("SAM-11")).toMatchObject({
+      status: "completed",
+      tracked: {
+        github_pr_recovered: true,
+        github_pull_request: { number: 11, url: "https://github.test/acme/widgets/pull/11" },
+        github_pull_request_status: { checks_status: "success" }
+      }
+    });
+    await orchestrator.stop();
+  });
 });
 
 function config(root: string, command: string): SymphonyConfig {
@@ -262,6 +314,37 @@ function failingInspection(): PullRequestInspection {
     checks: [{ name: "verify", status: "completed", conclusion: "failure", details_url: "https://github.test/checks/10" }],
     reviews: [],
     review_comments: []
+  };
+}
+
+function healthyInspection(): PullRequestInspection {
+  return {
+    number: 11,
+    url: "https://github.test/acme/widgets/pull/11",
+    branch: "symphony/sam-11-recovered-pr-should-not-redispatch",
+    title: "SAM-11: Recovered PR should not redispatch",
+    state: "open",
+    checks_status: "success",
+    review_status: "review_required",
+    head_sha: "def456abc123",
+    mergeable_state: "clean",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: "PR #11 is open; checks=success; review=review_required at def456abc123.",
+    checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/11" }],
+    reviews: [],
+    review_comments: []
+  };
+}
+
+function discoveredPullRequest(): DiscoveredPullRequest {
+  return {
+    number: 11,
+    url: "https://github.test/acme/widgets/pull/11",
+    branch: "symphony/sam-11-recovered-pr-should-not-redispatch",
+    title: "SAM-11: Recovered PR should not redispatch",
+    created: false,
+    issue_identifier: "SAM-11"
   };
 }
 
