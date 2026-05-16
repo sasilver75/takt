@@ -52,10 +52,12 @@ describe("orchestrator", () => {
     const snapshot = orchestrator.snapshot() as {
       counts: { retrying: number };
       codex_totals: { total_tokens: number };
+      rate_limits: unknown;
       recent_events: Array<{ event: string; issue_identifier?: string; message?: string | null }>;
     };
     expect(snapshot.counts.retrying).toBe(1);
     expect(snapshot.codex_totals.total_tokens).toBe(7);
+    expect(snapshot.rate_limits).toEqual({ primary: { used: 1, limit: 100 } });
     expect(snapshot.recent_events.some((event) => event.event === "dispatch" && event.issue_identifier === "ABC-1")).toBe(true);
     expect(snapshot.recent_events.some((event) => event.event === "turn/completed" && event.issue_identifier === "ABC-1")).toBe(true);
     await orchestrator.stop();
@@ -1500,6 +1502,7 @@ rl.on("line", (line) => {
     setTimeout(() => {
       send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
       send({ method: "thread/tokenUsage/updated", params: { threadId: "thread-1", turnId: "turn-1", tokenUsage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 } } });
+      send({ method: "account/rateLimits/updated", params: { rateLimits: { primary: { used: 1, limit: 100 } } } });
       send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
     }, 10);
   }
