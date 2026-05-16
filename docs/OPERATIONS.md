@@ -102,7 +102,7 @@ SYMPHONY_LIVE_INTEGRATION=1 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm integration
 
 Without `SYMPHONY_LIVE_INTEGRATION=1`, the command prints `SKIP` and exits successfully. When enabled, it loads the workflow, validates dispatch config, reads the configured Linear candidate queue, and reads GitHub repository metadata when `github.enabled` is true. It does not transition issues, comment on tickets, push branches, open PRs, or run Codex workers. Mutating full-loop checks remain controlled operator runs.
 
-Live runs performed on May 15, 2026:
+Live runs performed during May 15-16, 2026:
 
 - Linear project: `Gallatin Demo` (`5f14e4e68dc4`).
 - `SAM-65`, `Validate Symphony live run on Gallatin Demo`: real Codex app-server ran through Symphony, created and locally committed `LIVE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`. This first run exposed two operator issues: the GitHub remote still contained the placeholder source, and an in-repo workspace root allowed package-manager parent traversal.
