@@ -29,6 +29,8 @@ hooks:
   after_create: |
     git clone https://github.com/sasilver75/galatin-demo.git .
   before_run: |
+    git fetch origin main
+    git merge --ff-only origin/main
     pnpm install --frozen-lockfile=false
 agent:
   max_concurrent_agents: 2

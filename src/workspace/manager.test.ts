@@ -1,10 +1,14 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import type { SymphonyConfig } from "../domain.js";
 import { createLogger } from "../observability/logger.js";
 import { WorkspaceManager } from "./manager.js";
+
+const execFileAsync = promisify(execFile);
 
 function config(root: string, hooks: Partial<SymphonyConfig["hooks"]> = {}): SymphonyConfig {
   return {
@@ -77,4 +81,46 @@ describe("workspace manager", () => {
     await expect(manager.createForIssue("ABC-2")).rejects.toMatchObject({ code: "workspace_path_not_directory" });
     expect(() => manager.validateAgentCwd(path.dirname(root))).toThrow(/workspace root/);
   });
+
+  test("before_run hook can fast-forward a reused git workspace", async () => {
+    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-ws-git-"));
+    const source = path.join(temp, "source");
+    const root = path.join(temp, "workspaces");
+    await mkdir(source);
+    await git(source, "init", "--initial-branch=main");
+    await git(source, "config", "user.name", "Symphony Test");
+    await git(source, "config", "user.email", "symphony-test@example.invalid");
+    await writeFile(path.join(source, "README.md"), "one\n");
+    await git(source, "add", "README.md");
+    await git(source, "commit", "-m", "initial");
+
+    const manager = new WorkspaceManager(
+      () =>
+        config(root, {
+          after_create: `git clone ${source} .`,
+          before_run: "git fetch origin main && git merge --ff-only origin/main"
+        }),
+      createLogger(() => undefined)
+    );
+    const workspace = await manager.createForIssue("ABC-1");
+    const firstHead = await gitOut(workspace.path, "rev-parse", "HEAD");
+
+    await writeFile(path.join(source, "README.md"), "two\n");
+    await git(source, "add", "README.md");
+    await git(source, "commit", "-m", "second");
+    const secondHead = await gitOut(source, "rev-parse", "HEAD");
+
+    await manager.runBeforeRun(workspace.path);
+    expect(await gitOut(workspace.path, "rev-parse", "HEAD")).toBe(secondHead);
+    expect(firstHead).not.toBe(secondHead);
+  });
 });
+
+async function git(cwd: string, ...args: string[]): Promise<void> {
+  await execFileAsync("git", args, { cwd });
+}
+
+async function gitOut(cwd: string, ...args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", args, { cwd });
+  return stdout.trim();
+}
