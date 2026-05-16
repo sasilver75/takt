@@ -1369,7 +1369,7 @@ function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledK
     });
   }
 
-  for (const review of latestReviewsByReviewer(inspection.reviews, ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]).filter((review) => review.state === "CHANGES_REQUESTED")) {
+  for (const review of actionableReviewsByReviewer(inspection, ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]).filter((review) => review.state === "CHANGES_REQUESTED")) {
     feedback.push({
       key: feedbackKey("review_changes", reviewIdentity(review)),
       reason: "GitHub review requested changes"
@@ -1388,7 +1388,7 @@ function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledK
       reason: "GitHub PR conversation comments need attention"
     });
   }
-  for (const review of latestReviewsByReviewer(inspection.reviews, ["COMMENTED"]).filter((review) => Boolean(review.body?.trim()))) {
+  for (const review of actionableReviewsByReviewer(inspection, ["COMMENTED"]).filter((review) => Boolean(review.body?.trim()))) {
     feedback.push({
       key: feedbackKey("review_comment", reviewIdentity(review)),
       reason: "GitHub review comments need attention"
@@ -1412,7 +1412,7 @@ function pullRequestFollowupFeedback(inspection: PullRequestInspection, handledK
       });
     }
   } else if ((inspection.review_threads ?? []).length === 0) {
-    for (const comment of inspection.review_comments ?? []) {
+    for (const comment of actionableReviewComments(inspection)) {
       feedback.push({
         key: feedbackKey("inline_comment", {
           author: comment.author,
@@ -1462,8 +1462,27 @@ function actionableChecks(inspection: PullRequestInspection): PullRequestInspect
   });
 }
 
+function actionableReviewsByReviewer(inspection: PullRequestInspection, states: string[]): PullRequestInspection["reviews"] {
+  return latestReviewsByReviewer(inspection.reviews, states).filter((review) => isCurrentHeadFeedback(review.commit_id, inspection.head_sha));
+}
+
+function actionableReviewComments(inspection: PullRequestInspection): PullRequestInspection["review_comments"] {
+  return (inspection.review_comments ?? []).filter((comment) => isCurrentHeadFeedback(comment.commit_id, inspection.head_sha));
+}
+
 function actionableReviewThreads(inspection: PullRequestInspection): PullRequestInspection["review_threads"] {
-  return (inspection.review_threads ?? []).filter((thread) => !thread.is_resolved && thread.comments.some((comment) => comment.body.trim().length > 0));
+  return (inspection.review_threads ?? []).filter(
+    (thread) =>
+      !thread.is_resolved &&
+      !thread.is_outdated &&
+      thread.comments.some((comment) => comment.body.trim().length > 0) &&
+      thread.comments.some((comment) => isCurrentHeadFeedback(comment.commit_id, inspection.head_sha))
+  );
+}
+
+function isCurrentHeadFeedback(commitId: string | null | undefined, headSha: string | null): boolean {
+  if (!commitId || !headSha) return true;
+  return commitId === headSha;
 }
 
 function latestReviewsByReviewer(reviews: PullRequestInspection["reviews"], states: string[]): PullRequestInspection["reviews"] {
@@ -1528,8 +1547,8 @@ function renderPullRequestFollowupContext(
     }
   }
   const reviewSummaries = [
-    ...latestReviewsByReviewer(inspection.reviews, ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]).filter((review) => review.state === "CHANGES_REQUESTED"),
-    ...latestReviewsByReviewer(inspection.reviews, ["COMMENTED"]).filter((review) => Boolean(review.body?.trim()))
+    ...actionableReviewsByReviewer(inspection, ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]).filter((review) => review.state === "CHANGES_REQUESTED"),
+    ...actionableReviewsByReviewer(inspection, ["COMMENTED"]).filter((review) => Boolean(review.body?.trim()))
   ];
   if (reviewSummaries.length > 0) {
     lines.push("", "Review summaries:");
@@ -1553,9 +1572,9 @@ function renderPullRequestFollowupContext(
         `- ${location || "unknown location"}${thread.is_outdated ? " (outdated)" : ""}: ${latest ? `${latest.author}: ${singleLine(latest.body)}${latest.url ? ` (${latest.url})` : ""}` : "No comment text."}`
       );
     }
-  } else if ((inspection.review_comments ?? []).length > 0) {
+  } else if (actionableReviewComments(inspection).length > 0) {
     lines.push("", "Inline review comments:");
-    for (const comment of (inspection.review_comments ?? []).slice(0, 20)) {
+    for (const comment of actionableReviewComments(inspection).slice(0, 20)) {
       const location = [comment.path, comment.line ? `line ${comment.line}` : null].filter(Boolean).join(":");
       lines.push(`- ${location || "unknown location"} by ${comment.author}: ${singleLine(comment.body)}${comment.url ? ` (${comment.url})` : ""}`);
     }

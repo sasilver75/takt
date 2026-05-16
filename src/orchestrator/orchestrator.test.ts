@@ -6,6 +6,7 @@ import type {
   DiscoveredPullRequest,
   DurableStateSnapshot,
   DurableStateStore,
+  IssueDebugRecord,
   PullRequestInspection,
   PullRequestEvidencePublisher,
   PullRequestMerger,
@@ -1003,6 +1004,56 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("does not requeue recovered stale review feedback from a previous PR head", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-stale-recovered-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      tracker: {
+        ...config(root, "node missing.js").tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const reviewIssue = issue({ id: "i-pr-stale-recovered", identifier: "SAM-32", state: "Needs Human", title: "Recovered stale feedback" });
+    const tracker = new LocalTracker([reviewIssue]);
+    let inspectCount = 0;
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        inspectCount += 1;
+        return staleRecoveredReviewFeedbackInspection();
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+    orchestrator.state.issue_history.set(reviewIssue.identifier, recoveredPrRecord(reviewIssue.id, reviewIssue.identifier));
+
+    await orchestrator.tick();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(inspectCount).toBe(1);
+    expect(tracker.comments).toHaveLength(0);
+    expect(tracker.getIssue("i-pr-stale-recovered")?.state).toBe("Needs Human");
+    expect(orchestrator.snapshot()).toMatchObject({ counts: { running: 0, retrying: 0, pull_requests: 1 } });
+    expect(
+      (orchestrator.snapshot() as { recent_events: Array<{ event: string }> }).recent_events.some((event) => event.event === "pull_request_followup_queued")
+    ).toBe(false);
+    await orchestrator.stop();
+  });
+
   test("recovers open Symphony PRs after restart and suppresses duplicate dispatch", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-recover-"));
     const cfg = {
@@ -1661,6 +1712,67 @@ function movingReviewThreadInspection(headSha: string): PullRequestInspection {
   };
 }
 
+function staleRecoveredReviewFeedbackInspection(): PullRequestInspection {
+  return {
+    number: 32,
+    url: "https://github.test/acme/widgets/pull/32",
+    branch: "symphony/sam-32-recovered-stale-feedback",
+    title: "SAM-32: Recovered stale feedback",
+    state: "open",
+    checks_status: "success",
+    review_status: "review_required",
+    head_sha: "new-head-sha",
+    mergeable_state: "clean",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: "PR #32 is open; checks=success; review=review_required at new-head-sha.",
+    checks: [{ name: "verify", status: "completed", conclusion: "success", details_url: "https://github.test/checks/32" }],
+    reviews: [
+      {
+        reviewer: "reviewer",
+        state: "COMMENTED",
+        submitted_at: "2026-05-16T06:40:00.000Z",
+        body: "Please update this note.",
+        url: "https://github.test/review/32",
+        commit_id: "old-head-sha"
+      }
+    ],
+    review_comments: [
+      {
+        author: "reviewer",
+        path: "src/widget.ts",
+        line: 12,
+        body: "Old inline comment on the previous head.",
+        url: "https://github.test/comment/32",
+        created_at: "2026-05-16T06:40:10.000Z",
+        updated_at: "2026-05-16T06:40:10.000Z",
+        commit_id: "old-head-sha",
+        original_commit_id: "old-head-sha"
+      }
+    ],
+    issue_comments: [],
+    review_threads: [
+      {
+        id: "thread-32-outdated",
+        is_resolved: false,
+        is_outdated: true,
+        path: "src/widget.ts",
+        line: 12,
+        comments: [
+          {
+            author: "reviewer",
+            body: "Outdated thread from the previous head.",
+            url: "https://github.test/thread/32",
+            created_at: "2026-05-16T06:40:20.000Z",
+            updated_at: "2026-05-16T06:40:20.000Z",
+            commit_id: "old-head-sha"
+          }
+        ]
+      }
+    ]
+  };
+}
+
 function approvedInspection(): PullRequestInspection {
   return {
     number: 16,
@@ -1718,6 +1830,27 @@ function discoveredPullRequest(): DiscoveredPullRequest {
     title: "SAM-11: Recovered PR should not redispatch",
     created: false,
     issue_identifier: "SAM-11"
+  };
+}
+
+function recoveredPrRecord(issueId: string, identifier: string): IssueDebugRecord {
+  return {
+    issue_id: issueId,
+    issue_identifier: identifier,
+    workspace_path: null,
+    restart_count: 0,
+    last_error: null,
+    run_attempts: [],
+    recent_events: [],
+    tracked: {
+      github_pull_request: {
+        number: 32,
+        url: "https://github.test/acme/widgets/pull/32",
+        branch: "symphony/sam-32-recovered-stale-feedback",
+        title: "SAM-32: Recovered stale feedback",
+        created: false
+      }
+    }
   };
 }
 

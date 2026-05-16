@@ -2140,7 +2140,9 @@ Use the same validation profiles as Section 17:
   across process restarts. Live worker processes are not required to survive restart.
 - GitHub PR lifecycle extension owns orchestrator-side PR publishing/reconciliation, including
   top-level PR conversation comments, submitted reviews, inline comments, unresolved review
-  threads, and check results as worker follow-up inputs.
+  threads, and check results as worker follow-up inputs. Implementations SHOULD avoid requeueing
+  stale review feedback that is tied to a previous PR head SHA or marked outdated during recovered
+  PR reconciliation.
 - Worker evidence extension lets workers write an implementation-defined evidence manifest that the
   orchestrator publishes back to the PR without exposing GitHub credentials to workers. Malformed
   evidence manifests SHOULD fail visibly instead of being silently treated as absent evidence.
