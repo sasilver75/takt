@@ -1,8 +1,8 @@
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import type { PullRequestPublisher, SymphonyConfig } from "../domain.js";
+import type { PullRequestInspection, PullRequestPublisher, PullRequestTracker, SymphonyConfig } from "../domain.js";
 import { createLogger } from "../observability/logger.js";
 import { FakeTracker, issue } from "../testing/fakes.js";
 import { LocalTracker } from "../testing/localTracker.js";
@@ -122,6 +122,69 @@ describe("orchestrator", () => {
     expect(published).toHaveLength(1);
     await orchestrator.stop();
   });
+
+  test("requeues worker follow-up when a published PR has failing checks", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-followup-"));
+    const serverPath = path.join(root, "fake-codex-ready.mjs");
+    await writeFile(serverPath, fakePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-followup", identifier: "SAM-10", state: "Todo", title: "Close PR loop" });
+    const tracker = new LocalTracker([activeIssue]);
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return { number: 10, url: "https://github.test/acme/widgets/pull/10", branch: "symphony/sam-10-close-pr-loop", title: "SAM-10: Close PR loop", created: published.length === 1 };
+      }
+    };
+    const pullRequestTracker: PullRequestTracker = {
+      async inspect() {
+        return failingInspection();
+      }
+    };
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }} attempt={{ attempt }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      pullRequestPublisher: publisher,
+      pullRequestTracker,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => published.length === 1, "initial pull request publication");
+    await orchestrator.tick();
+    await waitFor(() => published.length === 2, "pull request follow-up publication");
+
+    expect(tracker.getIssue("i-pr-followup")?.state).toBe("Needs Human");
+    expect(tracker.comments.some((comment) => comment.body.includes("PR follow-up queued") && comment.body.includes("verify"))).toBe(true);
+    const promptLog = await readFile(path.join(manager.workspacePath("SAM-10"), "prompts.log"), "utf8");
+    expect(promptLog).toContain("Orchestrator follow-up context");
+    expect(promptLog).toContain("GitHub checks are failing");
+    expect(promptLog).toContain("verify");
+    expect(orchestrator.issueSnapshot("SAM-10")).toMatchObject({
+      tracked: { github_pull_request_status: { checks_status: "failure" } }
+    });
+    await orchestrator.stop();
+  });
 });
 
 function config(root: string, command: string): SymphonyConfig {
@@ -161,7 +224,7 @@ function config(root: string, command: string): SymphonyConfig {
 function fakePrReadyCodexServerSource(): string {
   return `
 import { createInterface } from "node:readline";
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 const rl = createInterface({ input: process.stdin });
 function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 rl.on("line", (line) => {
@@ -169,6 +232,8 @@ rl.on("line", (line) => {
   if (msg.method === "initialize") send({ id: msg.id, result: {} });
   if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" } } });
   if (msg.method === "turn/start") {
+    const text = msg.params?.input?.[0]?.text ?? "";
+    appendFileSync("prompts.log", text + "\\n---\\n");
     send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
     setTimeout(() => {
       writeFileSync("SYMPHONY_PR_READY.json", JSON.stringify({ title: "SAM-9: Ship PR loop", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
@@ -178,6 +243,26 @@ rl.on("line", (line) => {
   }
 });
 `;
+}
+
+function failingInspection(): PullRequestInspection {
+  return {
+    number: 10,
+    url: "https://github.test/acme/widgets/pull/10",
+    branch: "symphony/sam-10-close-pr-loop",
+    title: "SAM-10: Close PR loop",
+    state: "open",
+    checks_status: "failure",
+    review_status: "review_required",
+    head_sha: "abc123def456",
+    mergeable_state: "clean",
+    draft: false,
+    checked_at: new Date().toISOString(),
+    summary: "PR #10 is open; checks=failure; review=review_required at abc123def456.",
+    checks: [{ name: "verify", status: "completed", conclusion: "failure", details_url: "https://github.test/checks/10" }],
+    reviews: [],
+    review_comments: []
+  };
 }
 
 function githubDisabled(): SymphonyConfig["github"] {

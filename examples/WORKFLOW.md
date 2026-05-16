@@ -92,6 +92,8 @@ When the implementation is ready for PR review, write `SYMPHONY_PR_READY.json` i
 
 Do not create the GitHub PR yourself and do not move the Linear issue to review. Symphony will push the branch, create or update the PR, comment the PR link in Linear, and move the issue to `Needs Human`.
 
+If this run is a PR follow-up, Symphony will append an orchestrator follow-up context section after this prompt with failing checks, review summaries, or inline review comments. Treat that section as the current task brief and update the existing branch/PR rather than starting a new issue branch.
+
 Safety requirements:
 
 - Do not print or commit secrets.

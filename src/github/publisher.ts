@@ -6,16 +6,20 @@ import { promisify } from "node:util";
 import type { Issue, PrReadyManifest, PublishedPullRequest, PullRequestPublisher, SymphonyConfig } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
+import { GitHubApiClient, type FetchLike } from "./client.js";
 
 const execFileAsync = promisify(execFile);
-type FetchLike = typeof fetch;
 
 export class GitHubPullRequestPublisher implements PullRequestPublisher {
+  private readonly api: GitHubApiClient;
+
   constructor(
     private readonly getConfig: () => SymphonyConfig,
     private readonly logger: Logger,
-    private readonly fetchImpl: FetchLike = fetch
-  ) {}
+    fetchImpl: FetchLike = fetch
+  ) {
+    this.api = new GitHubApiClient(getConfig, fetchImpl);
+  }
 
   async publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest }): Promise<PublishedPullRequest> {
     const config = this.getConfig().github;
@@ -62,7 +66,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
   private async findOpenPullRequest(branch: string): Promise<{ number: number; url: string } | null> {
     const config = this.getConfig().github;
     const head = `${config.owner}:${branch}`;
-    const response = await this.github("GET", `/repos/${config.owner}/${config.repo}/pulls?state=open&head=${encodeURIComponent(head)}&base=${encodeURIComponent(config.base_branch)}`);
+    const response = await this.api.request("GET", `/repos/${config.owner}/${config.repo}/pulls?state=open&head=${encodeURIComponent(head)}&base=${encodeURIComponent(config.base_branch)}`);
     if (!Array.isArray(response)) return null;
     const first = response[0] as Record<string, unknown> | undefined;
     if (!first) return null;
@@ -72,7 +76,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
   private async createPullRequest(input: { title: string; body: string; branch: string }): Promise<{ number: number; url: string }> {
     const config = this.getConfig().github;
     return readPublished(
-      await this.github("POST", `/repos/${config.owner}/${config.repo}/pulls`, {
+      await this.api.request("POST", `/repos/${config.owner}/${config.repo}/pulls`, {
         title: input.title,
         body: input.body,
         head: input.branch,
@@ -84,28 +88,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
 
   private async updatePullRequest(number: number, input: { title: string; body: string }): Promise<{ number: number; url: string }> {
     const config = this.getConfig().github;
-    return readPublished(await this.github("PATCH", `/repos/${config.owner}/${config.repo}/pulls/${number}`, input));
-  }
-
-  private async github(method: "GET" | "POST" | "PATCH", route: string, body?: unknown): Promise<unknown> {
-    const config = this.getConfig().github;
-    if (!config.token) throw new SymphonyError("github_not_configured", "github.token is required");
-    const response = await this.fetchImpl(`${config.api_endpoint.replace(/\/$/, "")}${route}`, {
-      method,
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${config.token}`,
-        "content-type": "application/json",
-        "x-github-api-version": "2022-11-28"
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      const message = payload && typeof payload === "object" && "message" in payload ? String((payload as { message?: unknown }).message) : response.statusText;
-      throw new SymphonyError("github_api_error", `GitHub API ${method} ${route} failed: ${message}`);
-    }
-    return payload;
+    return readPublished(await this.api.request("PATCH", `/repos/${config.owner}/${config.repo}/pulls/${number}`, input));
   }
 }
 

@@ -1,0 +1,212 @@
+import type {
+  PublishedPullRequest,
+  PullRequestCheckSummary,
+  PullRequestChecksStatus,
+  PullRequestInspection,
+  PullRequestReviewCommentSummary,
+  PullRequestReviewSummary,
+  PullRequestReviewStatus,
+  PullRequestTracker,
+  SymphonyConfig
+} from "../domain.js";
+import { SymphonyError } from "../errors.js";
+import type { Logger } from "../observability/logger.js";
+import { GitHubApiClient, type FetchLike } from "./client.js";
+
+export class GitHubPullRequestTracker implements PullRequestTracker {
+  private readonly api: GitHubApiClient;
+
+  constructor(
+    private readonly getConfig: () => SymphonyConfig,
+    private readonly logger: Logger,
+    fetchImpl: FetchLike = fetch
+  ) {
+    this.api = new GitHubApiClient(getConfig, fetchImpl);
+  }
+
+  async inspect(input: PublishedPullRequest): Promise<PullRequestInspection> {
+    const config = this.getConfig().github;
+    if (!config.owner || !config.repo) throw new SymphonyError("github_not_configured", "GitHub owner/repo are required for PR inspection");
+    const pr = await this.api.request<Record<string, unknown>>("GET", `/repos/${config.owner}/${config.repo}/pulls/${input.number}`);
+    const number = readNumber(pr.number, input.number);
+    const url = readString(pr.html_url) ?? input.url;
+    const branch = readNestedString(pr, ["head", "ref"]) ?? input.branch;
+    const headSha = readNestedString(pr, ["head", "sha"]);
+    const state = readLifecycleState(pr);
+    const checks = headSha ? await this.inspectChecks(headSha) : [];
+    const reviews = state === "open" ? await this.inspectReviews(input.number) : [];
+    const reviewComments = state === "open" ? await this.inspectReviewComments(input.number) : [];
+    const checksStatus = classifyCheckRuns(checks);
+    const reviewStatus = state === "open" ? classifyReviews(reviews) : "unknown";
+    const inspection: PullRequestInspection = {
+      number,
+      url,
+      branch,
+      title: readString(pr.title),
+      state,
+      checks_status: checksStatus,
+      review_status: reviewStatus,
+      head_sha: headSha,
+      mergeable_state: readString(pr.mergeable_state),
+      draft: readBoolean(pr.draft) ?? false,
+      checked_at: new Date().toISOString(),
+      summary: summarizeInspection(number, state, checksStatus, reviewStatus, headSha),
+      checks,
+      reviews,
+      review_comments: reviewComments
+    };
+    this.logger.info("github pr inspected", {
+      pr_number: inspection.number,
+      pr_url: inspection.url,
+      state: inspection.state,
+      checks_status: inspection.checks_status,
+      review_status: inspection.review_status,
+      head_sha: inspection.head_sha
+    });
+    return inspection;
+  }
+
+  private async inspectChecks(headSha: string): Promise<PullRequestCheckSummary[]> {
+    const config = this.getConfig().github;
+    const checkRunsPayload = await this.api.request<Record<string, unknown>>("GET", `/repos/${config.owner}/${config.repo}/commits/${encodeURIComponent(headSha)}/check-runs?per_page=100`);
+    const statusesPayload = await this.api.request<Record<string, unknown>>("GET", `/repos/${config.owner}/${config.repo}/commits/${encodeURIComponent(headSha)}/status`);
+    const runs = Array.isArray(checkRunsPayload.check_runs)
+      ? checkRunsPayload.check_runs.filter((run): run is Record<string, unknown> => Boolean(run) && typeof run === "object")
+      : [];
+    const statuses = Array.isArray(statusesPayload.statuses)
+      ? statusesPayload.statuses.filter((status): status is Record<string, unknown> => Boolean(status) && typeof status === "object")
+      : [];
+    return [
+      ...runs.map((run) => ({
+      name: readString(run.name) ?? "unnamed check",
+      status: readString(run.status),
+      conclusion: readString(run.conclusion),
+      details_url: readString(run.details_url) ?? readString(run.html_url)
+      })),
+      ...statuses.map(readCommitStatusSummary)
+    ];
+  }
+
+  private async inspectReviews(number: number): Promise<PullRequestReviewSummary[]> {
+    const config = this.getConfig().github;
+    const reviews = await this.api.request<unknown[]>("GET", `/repos/${config.owner}/${config.repo}/pulls/${number}/reviews?per_page=100`);
+    return (Array.isArray(reviews) ? reviews : []).map(readReviewSummary).filter((review): review is PullRequestReviewSummary => Boolean(review));
+  }
+
+  private async inspectReviewComments(number: number): Promise<PullRequestReviewCommentSummary[]> {
+    const config = this.getConfig().github;
+    const comments = await this.api.request<unknown[]>("GET", `/repos/${config.owner}/${config.repo}/pulls/${number}/comments?per_page=100`);
+    return (Array.isArray(comments) ? comments : []).map(readReviewCommentSummary).filter((comment): comment is PullRequestReviewCommentSummary => Boolean(comment));
+  }
+}
+
+export function classifyCheckRuns(runs: PullRequestCheckSummary[]): PullRequestChecksStatus {
+  if (runs.length === 0) return "unknown";
+  let sawSuccessfulCompletion = false;
+  for (const run of runs) {
+    const status = run.status?.toLowerCase() ?? "unknown";
+    const conclusion = run.conclusion?.toLowerCase() ?? null;
+    if (status !== "completed") return "pending";
+    if (!conclusion) return "pending";
+    if (["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(conclusion)) return "failure";
+    if (["success", "neutral", "skipped"].includes(conclusion)) sawSuccessfulCompletion = true;
+  }
+  return sawSuccessfulCompletion ? "success" : "unknown";
+}
+
+export function classifyReviews(reviews: PullRequestReviewSummary[]): PullRequestReviewStatus {
+  const latestByReviewer = new Map<string, { state: string; submittedAt: number }>();
+  for (const review of reviews) {
+    const reviewer = review.reviewer;
+    const submittedAt = review.submitted_at ? Date.parse(review.submitted_at) : 0;
+    const state = review.state.toUpperCase();
+    if (!state) continue;
+    if (!["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(state)) continue;
+    const existing = latestByReviewer.get(reviewer);
+    if (!existing || submittedAt >= existing.submittedAt) latestByReviewer.set(reviewer, { state, submittedAt });
+  }
+  const latest = [...latestByReviewer.values()].map((review) => review.state);
+  if (latest.some((state) => state === "CHANGES_REQUESTED")) return "changes_requested";
+  if (latest.some((state) => state === "APPROVED")) return "approved";
+  return "review_required";
+}
+
+function readReviewSummary(value: unknown): PullRequestReviewSummary | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  return {
+    reviewer: readNestedString(record, ["user", "login"]) ?? "unknown",
+    state: readString(record.state)?.toUpperCase() ?? "UNKNOWN",
+    submitted_at: readString(record.submitted_at),
+    body: readString(record.body),
+    url: readString(record.html_url)
+  };
+}
+
+function readReviewCommentSummary(value: unknown): PullRequestReviewCommentSummary | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const body = readString(record.body);
+  if (!body) return null;
+  return {
+    author: readNestedString(record, ["user", "login"]) ?? "unknown",
+    path: readString(record.path),
+    line: readNumberOrNull(record.line) ?? readNumberOrNull(record.original_line),
+    body,
+    url: readString(record.html_url)
+  };
+}
+
+function readCommitStatusSummary(status: Record<string, unknown>): PullRequestCheckSummary {
+  const state = readString(status.state)?.toLowerCase() ?? "unknown";
+  const completed = state === "pending" ? "pending" : "completed";
+  const conclusion = state === "success" ? "success" : state === "failure" || state === "error" ? "failure" : null;
+  return {
+    name: readString(status.context) ?? "commit status",
+    status: completed,
+    conclusion,
+    details_url: readString(status.target_url)
+  };
+}
+
+function readLifecycleState(pr: Record<string, unknown>): PullRequestInspection["state"] {
+  const merged = readBoolean(pr.merged) === true || typeof pr.merged_at === "string";
+  if (merged) return "merged";
+  return readString(pr.state)?.toLowerCase() === "closed" ? "closed" : "open";
+}
+
+function summarizeInspection(
+  number: number,
+  state: PullRequestInspection["state"],
+  checksStatus: PullRequestChecksStatus,
+  reviewStatus: PullRequestReviewStatus,
+  headSha: string | null
+): string {
+  const sha = headSha ? ` at ${headSha.slice(0, 12)}` : "";
+  return `PR #${number} is ${state}; checks=${checksStatus}; review=${reviewStatus}${sha}.`;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function readNumberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function readNestedString(record: Record<string, unknown>, path: string[]): string | null {
+  let current: unknown = record;
+  for (const key of path) {
+    if (!current || typeof current !== "object") return null;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return readString(current);
+}

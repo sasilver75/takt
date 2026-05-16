@@ -190,6 +190,55 @@ export type PullRequestPublisher = {
   publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest }): Promise<PublishedPullRequest>;
 };
 
+export type PullRequestLifecycleState = "open" | "merged" | "closed";
+export type PullRequestChecksStatus = "pending" | "success" | "failure" | "unknown";
+export type PullRequestReviewStatus = "approved" | "changes_requested" | "review_required" | "unknown";
+
+export type PullRequestCheckSummary = {
+  name: string;
+  status: string | null;
+  conclusion: string | null;
+  details_url: string | null;
+};
+
+export type PullRequestReviewSummary = {
+  reviewer: string;
+  state: string;
+  submitted_at: string | null;
+  body: string | null;
+  url: string | null;
+};
+
+export type PullRequestReviewCommentSummary = {
+  author: string;
+  path: string | null;
+  line: number | null;
+  body: string;
+  url: string | null;
+};
+
+export type PullRequestInspection = {
+  number: number;
+  url: string;
+  branch: string;
+  title: string | null;
+  state: PullRequestLifecycleState;
+  checks_status: PullRequestChecksStatus;
+  review_status: PullRequestReviewStatus;
+  head_sha: string | null;
+  mergeable_state: string | null;
+  draft: boolean;
+  checked_at: string;
+  summary: string;
+  checks: PullRequestCheckSummary[];
+  reviews: PullRequestReviewSummary[];
+  review_comments: PullRequestReviewCommentSummary[];
+};
+
+export type PullRequestTracker = {
+  inspect(input: PublishedPullRequest): Promise<PullRequestInspection>;
+};
+
 export type RunningEntry = {
   issue: Issue;
   identifier: string;
@@ -222,6 +271,7 @@ export type RetryEntry = {
   due_at_ms: number;
   timer_handle: NodeJS.Timeout | null;
   error: string | null;
+  context: string | null;
 };
 
 export type RuntimeState = {

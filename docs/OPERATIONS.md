@@ -52,6 +52,14 @@ When `github.enabled: true`, the issue-to-PR loop is:
 4. Symphony creates or updates a GitHub PR against `github.base_branch`.
 5. Symphony comments the PR URL in Linear and moves the issue to `tracker.review_state`.
 
+After a PR is published, Symphony owns the PR lifecycle reconciliation loop:
+
+- It inspects the GitHub PR, latest head checks, reviews, and inline review comments on each poll tick.
+- Pending checks, passing checks, and review-required states stay in the human-review lane.
+- Merged or closed PRs are recorded as terminal PR states in the issue debug record.
+- Failing checks or requested changes move the Linear issue back to `tracker.claim_state`, comment a concise follow-up brief in Linear, and launch or queue another worker attempt. The worker receives that same brief in its first-turn prompt, including failing check names, review summaries, and inline comment excerpts.
+- Workers still do not receive `GITHUB_TOKEN`; they update the existing branch by committing in the issue workspace and refreshing `github.pr_ready_file`. Symphony republishes the PR from the orchestrator side.
+
 The configured `runtime.docker.codex_home` path is used only as an auth source. Symphony copies `auth.json` into an ephemeral per-run temp directory, mounts that minimal copy read-write into the worker container, and deletes it during runtime cleanup. It intentionally does not copy Codex plugin caches, marketplace config, app approvals, rollout state, or shell history, so workers do not inherit ambient Linear/GitHub/Vercel tools from the operator environment. Use a dedicated low-privilege Codex account/home for production factory runs. For a more restrictive deployment, also set stricter Codex `approval_policy`, `thread_sandbox`, and `turn_sandbox_policy` values in `WORKFLOW.md`, and run Symphony itself under a dedicated OS/container/VM boundary with limited credentials.
 
 ## Observability
@@ -61,7 +69,7 @@ Structured logs are written as stable `key=value` lines. Issue logs include `iss
 When the HTTP extension is enabled:
 
 - `GET /` returns a human-readable dashboard.
-- `GET /api/v1/state` returns running sessions, retry queue, token/runtime totals, and rate limits.
+- `GET /api/v1/state` returns running sessions, retry queue, published PR status, token/runtime totals, and rate limits.
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
 - `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live runtime-reachable MCP bridge, and was used by a worker. Tracker secret values and MCP bearer tokens are redacted before event payloads are recorded.

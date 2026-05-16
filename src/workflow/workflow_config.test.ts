@@ -71,11 +71,13 @@ describe("workflow loader and config", () => {
   test("strict prompt rendering supports issue and attempt and rejects unknown variables", async () => {
     const workflow = {
       config: {},
-      prompt_template: "Work {{ issue.identifier }} attempt={{ attempt }}",
+      prompt_template: "Work {{ issue.identifier }} attempt={{ attempt }} context={{ followup_context }}",
       path: "/tmp/WORKFLOW.md",
       loaded_at: new Date().toISOString()
     };
-    await expect(renderIssuePrompt(workflow, issue({ identifier: "ABC-9" }), 3)).resolves.toContain("ABC-9 attempt=3");
+    const prompt = await renderIssuePrompt(workflow, issue({ identifier: "ABC-9" }), 3, "checks failed");
+    expect(prompt).toContain("ABC-9 attempt=3 context=checks failed");
+    expect(prompt).toContain("Orchestrator follow-up context");
     await expect(renderIssuePrompt({ ...workflow, prompt_template: "{{ missing.value }}" }, issue(), null)).rejects.toMatchObject({
       code: "template_render_error"
     });

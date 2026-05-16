@@ -9,7 +9,10 @@ import type {
   RuntimeEvent,
   RuntimeState,
   RunningEntry,
+  PublishedPullRequest,
+  PullRequestInspection,
   PullRequestPublisher,
+  PullRequestTracker,
   PrReadyManifest,
   SymphonyConfig,
   TrackerClient,
@@ -32,6 +35,7 @@ export type OrchestratorOptions = {
   linearTool?: GraphqlToolExecutor | null | undefined;
   linearBridgeFactory?: ((options: LinearGraphqlBridgeStartOptions) => Promise<LinearGraphqlBridgeHandle | null>) | null | undefined;
   pullRequestPublisher?: PullRequestPublisher | null | undefined;
+  pullRequestTracker?: PullRequestTracker | null | undefined;
 };
 
 export class Orchestrator {
@@ -92,6 +96,7 @@ export class Orchestrator {
     try {
       this.notifyConfigReload(this.options.getConfig());
       await this.reconcileRunningIssues();
+      await this.reconcilePullRequests();
       try {
         await this.options.validateDispatch();
       } catch (error) {
@@ -109,7 +114,7 @@ export class Orchestrator {
 
       for (const issue of sortForDispatch(issues)) {
         if (this.availableGlobalSlots() <= 0) break;
-        if (this.shouldDispatch(issue)) await this.dispatchIssue(issue, null);
+        if (this.shouldDispatch(issue)) await this.dispatchIssue(issue, null, null);
       }
     } finally {
       this.ticking = false;
@@ -140,14 +145,28 @@ export class Orchestrator {
       issue_identifier: retry.identifier,
       attempt: retry.attempt,
       due_at: new Date(retry.due_at_ms).toISOString(),
-      error: retry.error
+      error: retry.error,
+      context: retry.context
     }));
+    const pullRequests = [...this.state.issue_history.values()]
+      .map((record) => {
+        const pr = readTrackedPullRequest(record.tracked.github_pull_request);
+        if (!pr) return null;
+        return {
+          issue_id: record.issue_id,
+          issue_identifier: record.issue_identifier,
+          pull_request: pr,
+          status: record.tracked.github_pull_request_status ?? null
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
     const activeSeconds = [...this.state.running.values()].reduce((sum, entry) => sum + (now - entry.started_at_ms) / 1000, 0);
     return {
       generated_at: new Date(now).toISOString(),
-      counts: { running: running.length, retrying: retrying.length, completed: this.state.completed.size },
+      counts: { running: running.length, retrying: retrying.length, completed: this.state.completed.size, pull_requests: pullRequests.length },
       running,
       retrying,
+      pull_requests: pullRequests,
       codex_totals: {
         ...this.state.codex_totals,
         seconds_running: this.state.codex_totals.seconds_running + activeSeconds
@@ -238,6 +257,141 @@ export class Orchestrator {
     }
   }
 
+  private async reconcilePullRequests(): Promise<void> {
+    if (!this.options.getConfig().github.enabled || !this.options.pullRequestTracker) return;
+    for (const record of this.state.issue_history.values()) {
+      const pullRequest = readTrackedPullRequest(record.tracked.github_pull_request);
+      if (!pullRequest) continue;
+      if (this.state.running.has(record.issue_id) || this.state.retry_attempts.has(record.issue_id)) continue;
+      let inspection: PullRequestInspection;
+      try {
+        inspection = await this.options.pullRequestTracker.inspect(pullRequest);
+      } catch (error) {
+        const message = errorMessage(error);
+        record.last_error = message;
+        this.recordEvent({
+          at: new Date().toISOString(),
+          event: "pull_request_inspect_failed",
+          issue_id: record.issue_id,
+          issue_identifier: record.issue_identifier,
+          message
+        });
+        continue;
+      }
+      record.tracked.github_pull_request_status = inspection;
+      const statusKey = pullRequestStatusKey(inspection);
+      if (record.tracked.github_pr_status_key !== statusKey) {
+        record.tracked.github_pr_status_key = statusKey;
+        this.recordEvent({
+          at: new Date().toISOString(),
+          event: "pull_request_reconciled",
+          issue_id: record.issue_id,
+          issue_identifier: record.issue_identifier,
+          message: inspection.summary
+        });
+      }
+      if (inspection.state === "merged" || inspection.state === "closed") {
+        this.state.completed.add(record.issue_id);
+        record.tracked.github_pr_terminal_state = inspection.state;
+        continue;
+      }
+      const reason = pullRequestFollowupReason(inspection);
+      if (reason) await this.queuePullRequestFollowup(record, pullRequest, inspection, reason);
+    }
+  }
+
+  private async queuePullRequestFollowup(
+    record: IssueDebugRecord,
+    pullRequest: PublishedPullRequest,
+    inspection: PullRequestInspection,
+    reason: string
+  ): Promise<void> {
+    const actionKey = `followup:${pullRequestStatusKey(inspection)}`;
+    if (record.tracked.github_pr_last_followup_key === actionKey) return;
+    let issue: Issue | null = null;
+    try {
+      const refreshed = await this.options.tracker.fetchIssueStatesByIds([record.issue_id]);
+      issue = refreshed[0] ?? null;
+    } catch (error) {
+      const message = errorMessage(error);
+      record.last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_followup_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message
+      });
+      return;
+    }
+    if (!issue) {
+      record.last_error = "Tracked issue could not be refreshed for PR follow-up";
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "pull_request_followup_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: record.last_error
+      });
+      return;
+    }
+
+    const context = renderPullRequestFollowupContext(record, pullRequest, inspection, reason, this.options.getConfig().github.pr_ready_file);
+    await this.options.tracker.commentOnIssue?.(issue, `PR follow-up queued:\n\n${context}`).catch((error: unknown) => {
+      this.options.logger.warn("failed to comment on PR follow-up", { issue_id: issue?.id, error: errorMessage(error) });
+    });
+
+    let dispatchIssue = issue;
+    const config = this.options.getConfig();
+    if (!isActiveState(dispatchIssue.state, config)) {
+      const claimState = config.tracker.claim_state;
+      if (!claimState || !this.options.tracker.transitionIssue) {
+        const message = "PR follow-up requires tracker.claim_state and transition support";
+        record.last_error = message;
+        this.recordEvent({
+          at: new Date().toISOString(),
+          event: "pull_request_followup_failed",
+          issue_id: record.issue_id,
+          issue_identifier: record.issue_identifier,
+          message
+        });
+        return;
+      }
+      try {
+        dispatchIssue = await this.options.tracker.transitionIssue(dispatchIssue, claimState);
+      } catch (error) {
+        const message = errorMessage(error);
+        record.last_error = message;
+        this.recordEvent({
+          at: new Date().toISOString(),
+          event: "pull_request_followup_failed",
+          issue_id: record.issue_id,
+          issue_identifier: record.issue_identifier,
+          message
+        });
+        return;
+      }
+    }
+
+    const attempt = nextAttempt(record.restart_count === 0 ? null : record.restart_count);
+    record.tracked.github_pr_last_followup_key = actionKey;
+    record.tracked.github_pr_followup_context = context;
+    this.state.completed.delete(record.issue_id);
+    this.state.claimed.delete(record.issue_id);
+    if (this.shouldDispatch(dispatchIssue)) {
+      await this.dispatchIssue(dispatchIssue, attempt, context);
+    } else {
+      this.scheduleRetry(record.issue_id, attempt, record.issue_identifier, reason, false, context);
+    }
+    this.recordEvent({
+      at: new Date().toISOString(),
+      event: "pull_request_followup_queued",
+      issue_id: record.issue_id,
+      issue_identifier: record.issue_identifier,
+      message: reason
+    });
+  }
+
   private reconcileStalls(): void {
     const timeout = this.options.getConfig().codex.stall_timeout_ms;
     if (timeout <= 0) return;
@@ -246,7 +400,7 @@ export class Orchestrator {
       const last = entry.last_codex_timestamp_ms ?? entry.started_at_ms;
       if (now - last > timeout) {
         void this.terminateRunning(issueId, "stalled session", false);
-        this.scheduleRetry(issueId, nextAttempt(entry.retry_attempt), entry.identifier, "stalled session", false);
+        this.scheduleRetry(issueId, nextAttempt(entry.retry_attempt), entry.identifier, "stalled session", false, null);
       }
     }
   }
@@ -266,7 +420,7 @@ export class Orchestrator {
     return true;
   }
 
-  private async dispatchIssue(issue: Issue, attempt: number | null): Promise<void> {
+  private async dispatchIssue(issue: Issue, attempt: number | null, followupContext: string | null): Promise<void> {
     this.state.claimed.add(issue.id);
     let runIssue = issue;
     try {
@@ -275,13 +429,14 @@ export class Orchestrator {
       this.state.claimed.delete(issue.id);
       const message = errorMessage(error);
       this.ensureRecord(issue).last_error = message;
-      this.scheduleRetry(issue.id, nextAttempt(attempt), issue.identifier, message, false);
+      this.scheduleRetry(issue.id, nextAttempt(attempt), issue.identifier, message, false, followupContext);
       this.recordEvent({ at: new Date().toISOString(), event: "claim_failed", issue_id: issue.id, issue_identifier: issue.identifier, message });
       return;
     }
     const handle = new AgentRunHandle({
       issue: runIssue,
       attempt,
+      followupContext,
       getConfig: this.options.getConfig,
       getWorkflow: this.options.getWorkflow,
       workspaceManager: this.options.workspaceManager,
@@ -372,11 +527,11 @@ export class Orchestrator {
         this.state.completed.add(issueId);
         this.state.claimed.delete(issueId);
       } else {
-        this.scheduleRetry(issueId, 1, entry.identifier, record.last_error, true);
+        this.scheduleRetry(issueId, 1, entry.identifier, record.last_error, true, null);
       }
     } else {
       record.last_error = result.error ?? "worker failed";
-      this.scheduleRetry(issueId, nextAttempt(entry.retry_attempt), entry.identifier, record.last_error, false);
+      this.scheduleRetry(issueId, nextAttempt(entry.retry_attempt), entry.identifier, record.last_error, false, null);
     }
     this.recordEvent({
       at: new Date().toISOString(),
@@ -438,7 +593,7 @@ export class Orchestrator {
     }
   }
 
-  private scheduleRetry(issueId: string, attempt: number, identifier: string, error: string | null, continuation: boolean): void {
+  private scheduleRetry(issueId: string, attempt: number, identifier: string, error: string | null, continuation: boolean, context: string | null): void {
     const existing = this.state.retry_attempts.get(issueId);
     if (existing?.timer_handle) clearTimeout(existing.timer_handle);
     const delay = continuation ? 1000 : Math.min(10000 * 2 ** (attempt - 1), this.options.getConfig().agent.max_retry_backoff_ms);
@@ -449,7 +604,8 @@ export class Orchestrator {
       attempt,
       due_at_ms: dueAt,
       timer_handle: setTimeout(() => void this.onRetryTimer(issueId), delay),
-      error
+      error,
+      context
     };
     this.state.retry_attempts.set(issueId, retry);
     this.state.claimed.add(issueId);
@@ -463,7 +619,7 @@ export class Orchestrator {
     try {
       candidates = await this.options.tracker.fetchCandidateIssues();
     } catch {
-      this.scheduleRetry(issueId, retry.attempt + 1, retry.identifier, "retry poll failed", false);
+      this.scheduleRetry(issueId, retry.attempt + 1, retry.identifier, "retry poll failed", false, retry.context);
       return;
     }
     const issue = candidates.find((candidate) => candidate.id === issueId);
@@ -473,11 +629,11 @@ export class Orchestrator {
       return;
     }
     if (!this.shouldDispatchIgnoringClaim(issue)) {
-      this.scheduleRetry(issueId, retry.attempt + 1, issue.identifier, "no available orchestrator slots", false);
+      this.scheduleRetry(issueId, retry.attempt + 1, issue.identifier, "no available orchestrator slots", false, retry.context);
       return;
     }
     this.state.claimed.delete(issueId);
-    this.dispatchIssue(issue, retry.attempt);
+    this.dispatchIssue(issue, retry.attempt, retry.context);
   }
 
   private shouldDispatchIgnoringClaim(issue: Issue): boolean {
@@ -575,6 +731,83 @@ async function readPrReadyManifest(workspacePath: string, fileName: string): Pro
     if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") return null;
     throw error;
   }
+}
+
+function readTrackedPullRequest(value: unknown): PublishedPullRequest | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const number = typeof record.number === "number" ? record.number : null;
+  const url = typeof record.url === "string" ? record.url : null;
+  const branch = typeof record.branch === "string" ? record.branch : null;
+  const title = typeof record.title === "string" ? record.title : null;
+  const created = typeof record.created === "boolean" ? record.created : false;
+  if (!number || !url || !branch || !title) return null;
+  return { number, url, branch, title, created };
+}
+
+function pullRequestStatusKey(inspection: PullRequestInspection): string {
+  return [inspection.state, inspection.checks_status, inspection.review_status, inspection.head_sha ?? "no-sha"].join(":");
+}
+
+function pullRequestFollowupReason(inspection: PullRequestInspection): string | null {
+  const reasons: string[] = [];
+  if (inspection.checks_status === "failure") reasons.push("GitHub checks are failing");
+  if (inspection.review_status === "changes_requested") reasons.push("GitHub review requested changes");
+  return reasons.length > 0 ? reasons.join("; ") : null;
+}
+
+function renderPullRequestFollowupContext(
+  record: IssueDebugRecord,
+  pullRequest: PublishedPullRequest,
+  inspection: PullRequestInspection,
+  reason: string,
+  prReadyFile: string
+): string {
+  const lines = [
+    `Issue: ${record.issue_identifier}`,
+    `Pull request: ${pullRequest.url}`,
+    `Reason: ${reason}.`,
+    `Status: ${inspection.summary}`,
+    `Branch: ${inspection.branch}`,
+    `Head SHA: ${inspection.head_sha ?? "unknown"}`,
+    "",
+    "Worker task:",
+    "- Inspect the existing workspace and branch.",
+    "- Fix the PR feedback or failing verification.",
+    "- Commit the follow-up changes.",
+    `- Update ${prReadyFile} so Symphony can update the existing PR.`
+  ];
+  const failingChecks = inspection.checks.filter((check) => {
+    const status = check.status?.toLowerCase() ?? "unknown";
+    const conclusion = check.conclusion?.toLowerCase() ?? "";
+    return status !== "completed" || ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(conclusion);
+  });
+  if (failingChecks.length > 0) {
+    lines.push("", "Check details:");
+    for (const check of failingChecks.slice(0, 10)) {
+      const state = [check.status, check.conclusion].filter(Boolean).join("/");
+      lines.push(`- ${check.name}: ${state || "unknown"}${check.details_url ? ` (${check.details_url})` : ""}`);
+    }
+  }
+  const changesRequestedReviews = inspection.reviews.filter((review) => review.state === "CHANGES_REQUESTED");
+  if (changesRequestedReviews.length > 0) {
+    lines.push("", "Review summaries:");
+    for (const review of changesRequestedReviews.slice(0, 10)) {
+      lines.push(`- ${review.reviewer}${review.submitted_at ? ` at ${review.submitted_at}` : ""}: ${singleLine(review.body ?? "Changes requested.")}`);
+    }
+  }
+  if (inspection.review_comments.length > 0) {
+    lines.push("", "Inline review comments:");
+    for (const comment of inspection.review_comments.slice(0, 20)) {
+      const location = [comment.path, comment.line ? `line ${comment.line}` : null].filter(Boolean).join(":");
+      lines.push(`- ${location || "unknown location"} by ${comment.author}: ${singleLine(comment.body)}${comment.url ? ` (${comment.url})` : ""}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function singleLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
 function summarizeRaw(raw: unknown): string | null {

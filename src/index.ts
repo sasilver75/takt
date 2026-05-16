@@ -6,6 +6,7 @@ export * from "./workflow/prompt.js";
 export * from "./config/config.js";
 export * from "./tracker/linear.js";
 export * from "./github/publisher.js";
+export * from "./github/tracker.js";
 export * from "./workspace/manager.js";
 export * from "./orchestrator/orchestrator.js";
 export * from "./observability/logger.js";

@@ -1,5 +1,6 @@
 import type { HttpStatusServer } from "./http/server.js";
 import { GitHubPullRequestPublisher } from "./github/publisher.js";
+import { GitHubPullRequestTracker } from "./github/tracker.js";
 import { createHttpStatusServer } from "./http/server.js";
 import { createLogger, type Logger } from "./observability/logger.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
@@ -38,6 +39,7 @@ export class SymphonyService {
     this.workflowRuntime = runtime;
     const tracker = new LinearTrackerClient(() => runtime.getConfig());
     const pullRequestPublisher = new GitHubPullRequestPublisher(() => runtime.getConfig(), this.logger);
+    const pullRequestTracker = new GitHubPullRequestTracker(() => runtime.getConfig(), this.logger);
     const workspaceManager = new WorkspaceManager(() => runtime.getConfig(), this.logger);
     const orchestrator = new Orchestrator({
       getConfig: () => runtime.getConfig(),
@@ -47,6 +49,7 @@ export class SymphonyService {
       workspaceManager,
       linearTool: tracker,
       pullRequestPublisher,
+      pullRequestTracker,
       logger: this.logger
     });
     runtime.onReload((config) => orchestrator.notifyConfigReload(config));

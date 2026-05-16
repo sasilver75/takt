@@ -22,6 +22,7 @@ import { startLinearGraphqlBridge, type LinearGraphqlBridgeHandle, type LinearGr
 export type AgentRunnerOptions = {
   issue: Issue;
   attempt: number | null;
+  followupContext?: string | null | undefined;
   getConfig: () => SymphonyConfig;
   getWorkflow: () => WorkflowDefinition;
   workspaceManager: WorkspaceManager;
@@ -82,7 +83,7 @@ export class AgentRunHandle {
       for (;;) {
         const prompt =
           turnNumber === 1
-            ? await renderIssuePrompt(this.options.getWorkflow(), issue, this.options.attempt)
+            ? await renderIssuePrompt(this.options.getWorkflow(), issue, this.options.attempt, this.options.followupContext ?? null)
             : continuationPrompt(turnNumber, this.options.getConfig().agent.max_turns);
         await client.runTurn(prompt);
         if (await isPrReady(workspace.path, this.options.getConfig())) break;
