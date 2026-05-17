@@ -1,5 +1,10 @@
 keys.txt
 node_modules/
 dist/
+.pnpm-store/
+.takt/
 .symphony/
+.env
+.env.*
+coverage/
 *.log

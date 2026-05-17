@@ -2,6 +2,9 @@ keys.txt
 .git
 node_modules
 dist
+.pnpm-store
+.takt
+.symphony
 coverage
 .env
 .env.*
