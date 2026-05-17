@@ -6,7 +6,7 @@ import type { EvidenceArtifact, EvidenceManifest, PullRequestEvidencePublication
 import { SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import { GitHubApiClient, type FetchLike } from "./client.js";
-import { localEvidenceArtifactFiles, normalizeEvidenceArtifactPath } from "./evidenceArtifacts.js";
+import { localEvidenceArtifactScan, normalizeEvidenceArtifactPath } from "./evidenceArtifacts.js";
 
 export const SYMPHONY_EVIDENCE_COMMENT_MARKER = "<!-- symphony:evidence -->";
 const execFileAsync = promisify(execFile);
@@ -63,7 +63,9 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
     const config = this.getConfig().github;
     const uploadedPaths = new Set<string>();
     const warnings: string[] = [];
-    for (const artifactFile of await localEvidenceArtifactFiles(manifest, workspacePath)) {
+    const artifactScan = await localEvidenceArtifactScan(manifest, workspacePath);
+    warnings.push(...artifactScan.warnings);
+    for (const artifactFile of artifactScan.files) {
       try {
         const info = await stat(artifactFile.sourcePath);
         if (info.size > MAX_EVIDENCE_UPLOAD_BYTES) {

@@ -7,8 +7,13 @@ export type LocalEvidenceFile = {
   repositoryPath: string;
 };
 
+export type LocalEvidenceArtifactScan = {
+  files: LocalEvidenceFile[];
+  warnings: string[];
+};
+
 const DURABLE_ARTIFACT_ROOT = "artifacts";
-const MAX_DIRECTORY_FILES = 100;
+export const MAX_LOCAL_EVIDENCE_DIRECTORY_FILES = 100;
 
 export function normalizeEvidenceArtifactPath(value: string | undefined, workspacePath?: string): string | null {
   const raw = value?.trim();
@@ -44,7 +49,12 @@ export function localEvidenceArtifactRoots(manifest: EvidenceManifest | null | u
 }
 
 export async function localEvidenceArtifactFiles(manifest: EvidenceManifest, workspacePath: string): Promise<LocalEvidenceFile[]> {
+  return (await localEvidenceArtifactScan(manifest, workspacePath)).files;
+}
+
+export async function localEvidenceArtifactScan(manifest: EvidenceManifest, workspacePath: string): Promise<LocalEvidenceArtifactScan> {
   const files = new Map<string, LocalEvidenceFile>();
+  const warnings: string[] = [];
   for (const root of localEvidenceArtifactRoots(manifest, workspacePath)) {
     const sourcePath = path.join(workspacePath, root);
     let info;
@@ -58,11 +68,18 @@ export async function localEvidenceArtifactFiles(manifest: EvidenceManifest, wor
       continue;
     }
     if (!info.isDirectory()) continue;
-    for (const file of await walkDirectory(sourcePath, root, MAX_DIRECTORY_FILES)) {
+    const walked = await walkDirectory(sourcePath, root, MAX_LOCAL_EVIDENCE_DIRECTORY_FILES + 1);
+    if (walked.length > MAX_LOCAL_EVIDENCE_DIRECTORY_FILES) {
+      warnings.push(`Artifact directory contains more than ${MAX_LOCAL_EVIDENCE_DIRECTORY_FILES} files; only the first ${MAX_LOCAL_EVIDENCE_DIRECTORY_FILES} files were considered for upload: ${root}`);
+    }
+    for (const file of walked.slice(0, MAX_LOCAL_EVIDENCE_DIRECTORY_FILES)) {
       files.set(file.repositoryPath, file);
     }
   }
-  return [...files.values()].sort((a, b) => a.repositoryPath.localeCompare(b.repositoryPath));
+  return {
+    files: [...files.values()].sort((a, b) => a.repositoryPath.localeCompare(b.repositoryPath)),
+    warnings
+  };
 }
 
 export function evidenceArtifactWarningPath(artifact: EvidenceArtifact, workspacePath: string): string | null {

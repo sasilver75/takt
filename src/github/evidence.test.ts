@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import type { SymphonyConfig } from "../domain.js";
 import { createLogger } from "../observability/logger.js";
 import { GitHubPullRequestEvidencePublisher, renderEvidenceComment, SYMPHONY_EVIDENCE_COMMENT_MARKER } from "./evidence.js";
+import { MAX_LOCAL_EVIDENCE_DIRECTORY_FILES } from "./evidenceArtifacts.js";
 
 describe("GitHub PR evidence publisher", () => {
   test("creates a sticky PR evidence comment with reviewer artifacts", async () => {
@@ -115,6 +116,43 @@ describe("GitHub PR evidence publisher", () => {
     const body = String((comment?.body as { body?: unknown } | undefined)?.body ?? "");
     expect(body).toContain("https://github.test/acme/widgets/blob/symphony/sam-9/artifacts/SAM-9/report.txt");
     expect(body).not.toContain("Artifact Warnings");
+  });
+
+  test("warns when local artifact directories exceed the upload file cap", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-evidence-upload-cap-"));
+    await mkdir(path.join(workspace, "artifacts", "SAM-9", "screens"), { recursive: true });
+    for (let index = 0; index < MAX_LOCAL_EVIDENCE_DIRECTORY_FILES + 1; index += 1) {
+      await writeFile(path.join(workspace, "artifacts", "SAM-9", "screens", `${String(index).padStart(3, "0")}.txt`), `file ${index}\n`);
+    }
+    const requests: Array<{ method: string; url: string; body: unknown }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push({ method: String(init?.method ?? "GET"), url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (String(url).includes("/contents/artifacts/SAM-9/screens/") && String(init?.method ?? "GET") === "GET") {
+        return jsonResponse({ message: "Not Found" }, 404);
+      }
+      if (String(init?.method ?? "GET") === "GET") return jsonResponse([]);
+      if (String(init?.method ?? "GET") === "PUT") return jsonResponse({ content: { path: "artifact" } });
+      return jsonResponse({ id: 654, html_url: "https://github.test/acme/widgets/pull/9#issuecomment-654" });
+    };
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+
+    await expect(
+      publisher.publish({
+        pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9", title: "SAM-9", created: true },
+        workspacePath: workspace,
+        manifest: {
+          summary: "Verified with many local artifacts.",
+          artifacts: [{ kind: "report", path: "artifacts/SAM-9/screens", description: "Large local artifact directory." }]
+        }
+      })
+    ).resolves.toMatchObject({
+      warnings: expect.arrayContaining([expect.stringContaining(`more than ${MAX_LOCAL_EVIDENCE_DIRECTORY_FILES} files`)])
+    });
+
+    expect(requests.filter((request) => request.method === "PUT")).toHaveLength(MAX_LOCAL_EVIDENCE_DIRECTORY_FILES);
+    const comment = requests.find((request) => request.method === "POST");
+    const body = String((comment?.body as { body?: unknown } | undefined)?.body ?? "");
+    expect(body).toContain(`only the first ${MAX_LOCAL_EVIDENCE_DIRECTORY_FILES} files were considered for upload`);
   });
 
   test("recovers when the stored evidence comment id was deleted", async () => {

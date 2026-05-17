@@ -2149,6 +2149,8 @@ Use the same validation profiles as Section 17:
   evidence manifests SHOULD fail visibly instead of being silently treated as absent evidence.
   Screenshot/image artifacts SHOULD be easy for reviewers to inspect directly from the PR surface
   when the target review system supports inline previews.
+  Bounded artifact publication limits, such as per-file size or per-directory file caps, SHOULD be
+  surfaced as reviewer/operator-visible warnings rather than silently omitting evidence files.
   Implementations SHOULD distinguish completed verification assertions from supporting evidence
   commands such as dev-server launch, screenshot capture, log export, or trace collection. When
   represented in the manifest, supporting commands SHOULD carry command text plus optional
