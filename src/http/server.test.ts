@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
+import { MAX_LOCAL_EVIDENCE_DIRECTORY_FILES } from "../github/evidenceArtifacts.js";
 import { createLogger } from "../observability/logger.js";
 import { createHttpStatusServer } from "./server.js";
 
@@ -10,6 +11,10 @@ describe("HTTP status server", () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-http-artifacts-"));
     await mkdir(path.join(workspace, "artifacts", "ABC-1"), { recursive: true });
     await writeFile(path.join(workspace, "artifacts", "ABC-1", "home.png"), "fake image", "utf8");
+    await mkdir(path.join(workspace, "artifacts", "ABC-1", "many"), { recursive: true });
+    for (let index = 0; index < MAX_LOCAL_EVIDENCE_DIRECTORY_FILES + 1; index += 1) {
+      await writeFile(path.join(workspace, "artifacts", "ABC-1", "many", `${String(index).padStart(3, "0")}.txt`), `file ${index}\n`);
+    }
     const orchestrator = {
       snapshot: () => ({
         generated_at: "2026-01-01T00:00:00.000Z",
@@ -80,7 +85,10 @@ describe("HTTP status server", () => {
                 github_evidence_warnings: ["Artifact path is not tracked by git at publish time"],
                 github_evidence_manifest: {
                   summary: "Verified in browser.",
-                  artifacts: [{ kind: "screenshot", path: "artifacts/ABC-1/home.png", description: "Homepage" }],
+                  artifacts: [
+                    { kind: "screenshot", path: "artifacts/ABC-1/home.png", description: "Homepage" },
+                    { kind: "report", path: "artifacts/ABC-1/many", description: "Large evidence directory" }
+                  ],
                   app_urls: ["http://127.0.0.1:3000"],
                   verification: ["pnpm test"],
                   commands: [{ kind: "server", status: "started", command: "pnpm dev -- --host 127.0.0.1", description: "Served the app for screenshot capture." }]
@@ -136,10 +144,21 @@ describe("HTTP status server", () => {
         {
           normalized_path: "artifacts/ABC-1/home.png",
           local_url: "/artifacts/ABC-1/artifacts/ABC-1/home.png"
+        },
+        {
+          normalized_path: "artifacts/ABC-1/many",
+          local_url: null,
+          local_files: expect.arrayContaining([{ path: "artifacts/ABC-1/many/000.txt", url: "/artifacts/ABC-1/artifacts/ABC-1/many/000.txt" }])
         }
       ],
-      files: [{ path: "artifacts/ABC-1/home.png", url: "/artifacts/ABC-1/artifacts/ABC-1/home.png" }]
+      warnings: expect.arrayContaining([expect.stringContaining(`more than ${MAX_LOCAL_EVIDENCE_DIRECTORY_FILES} files`)]),
+      files: expect.arrayContaining([
+        { path: "artifacts/ABC-1/home.png", url: "/artifacts/ABC-1/artifacts/ABC-1/home.png" },
+        { path: "artifacts/ABC-1/many/000.txt", url: "/artifacts/ABC-1/artifacts/ABC-1/many/000.txt" },
+        { path: "artifacts/ABC-1/many/099.txt", url: "/artifacts/ABC-1/artifacts/ABC-1/many/099.txt" }
+      ])
     });
+    expect(artifacts.files).toHaveLength(MAX_LOCAL_EVIDENCE_DIRECTORY_FILES + 1);
     const artifactResponse = await fetch(`${base}/artifacts/ABC-1/artifacts/ABC-1/home.png`);
     expect(artifactResponse.status).toBe(200);
     expect(artifactResponse.headers.get("content-type")).toBe("image/png");

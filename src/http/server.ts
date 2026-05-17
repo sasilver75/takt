@@ -4,7 +4,7 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import type { EvidenceManifest } from "../domain.js";
-import { isDurableEvidenceArtifactPath, localEvidenceArtifactFiles, normalizeEvidenceArtifactPath } from "../github/evidenceArtifacts.js";
+import { isDurableEvidenceArtifactPath, localEvidenceArtifactFiles, localEvidenceArtifactScan, normalizeEvidenceArtifactPath } from "../github/evidenceArtifacts.js";
 import type { Orchestrator } from "../orchestrator/orchestrator.js";
 import type { Logger } from "../observability/logger.js";
 
@@ -413,8 +413,8 @@ async function artifactListSnapshot(snapshot: unknown): Promise<unknown> {
   const issue = snapshot as IssuePageSnapshot;
   const evidence = readEvidenceManifestFromIssue(issue);
   const workspacePath = issue.workspace?.path ?? null;
-  const files = evidence && workspacePath ? await localEvidenceArtifactFiles(evidence, workspacePath) : [];
-  const localFiles = files.map((file) => ({
+  const artifactScan = evidence && workspacePath ? await localEvidenceArtifactScan(evidence, workspacePath) : { files: [], warnings: [] };
+  const localFiles = artifactScan.files.map((file) => ({
     path: file.repositoryPath,
     url: `/artifacts/${encodeURIComponent(issue.issue_identifier ?? "")}/${encodePathSegments(file.repositoryPath)}`
   }));
@@ -435,6 +435,7 @@ async function artifactListSnapshot(snapshot: unknown): Promise<unknown> {
         local_files: matchingFiles
       };
     }),
+    warnings: artifactScan.warnings,
     files: localFiles
   };
 }

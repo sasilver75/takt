@@ -87,7 +87,7 @@ When the HTTP extension is enabled:
 - `GET /issues/<issue_identifier>` returns a human-readable issue drill-down with workspace, attempts, PR lifecycle, evidence, errors, and recent issue events.
 - `GET /api/v1/state` returns running sessions, retry queue, published PR status, token/runtime totals, and rate limits.
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state, including the bounded per-issue worker run-attempt ledger.
-- `GET /api/v1/<issue_identifier>/artifacts` lists local evidence artifacts declared by the issue's evidence manifest.
+- `GET /api/v1/<issue_identifier>/artifacts` lists local evidence artifacts declared by the issue's evidence manifest and includes local artifact scan warnings such as directory truncation.
 - `GET /artifacts/<issue_identifier>/<artifact_path>` serves local evidence files for paths declared by the evidence manifest under `artifacts/`. Paths outside that durable artifact root are rejected; served files include restrictive content security headers.
 - `POST /api/v1/refresh` queues an immediate poll/reconcile tick.
 - `linear_graphql_mcp_configured`, `linear_graphql_bridge_started`, and `linear_graphql_tool_call` events show whether the Symphony-owned Linear tool was configured, had a live runtime-reachable MCP bridge, and was used by a worker. Tracker secret values and MCP bearer tokens are redacted before event payloads are recorded.
