@@ -27,11 +27,11 @@ Takt is split into layers that mirror `SPEC.md` and keep the service legible to 
 - Agent execution: `src/agent/*`
   - Launches `codex.command` through the selected worker runtime, hosts a short-lived Streamable HTTP MCP server for `takt_linear`, registers its runtime-reachable URL with Codex for `linear_graphql`, speaks app-server JSON-RPC over stdio, handles approvals/user input/tool calls by policy, and streams events upward.
 - Coordination: `src/orchestrator/orchestrator.ts`
-  - Owns mutable scheduler state, polling, dispatch, reconciliation, retry timers, token accounting, and runtime snapshots.
+  - Owns mutable scheduler state, polling, candidate dispatch decisions, reconciliation, retry timers, token accounting, and runtime snapshots.
 - Durable state: `src/persistence/jsonStateStore.ts`
   - Persists restart-meaningful scheduler metadata under `workspace.root/.takt/state.json` and restores retry/history state before the first startup poll.
 - Observability and control: `src/observability/*`, `src/http/*`
-  - Emits structured key/value logs and optionally exposes dashboard/API endpoints.
+  - Emits structured key/value logs and optionally exposes dashboard/API endpoints, including the latest dispatch-decision reasons for candidate issues that did or did not run.
 - Deterministic factory harness: `src/harness/toyWebappFactory.test.ts`, `examples/toy-webapp`
   - Builds a frontend/backend TypeScript app in an isolated workspace, drives a scripted app-server session, exercises approval/tool handling, and verifies the produced artifact.
 

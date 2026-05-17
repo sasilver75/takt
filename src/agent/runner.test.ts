@@ -180,6 +180,83 @@ describe("agent runner with fake Codex app-server", () => {
     expect(response.result?.contentItems?.[0]?.text).toContain("Unsupported tool: not_a_real_tool");
     expect(events).toContain("unsupported_tool_call:not_a_real_tool");
   });
+
+  test("rejects multi-operation linear_graphql dynamic tool calls before executor access", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-agent-linear-tool-guard-"));
+    const serverPath = path.join(root, "fake-codex-linear-tool-guard.mjs");
+    await writeFile(serverPath, fakeLinearGraphqlMultiOperationServerSource());
+    await chmod(serverPath, 0o755);
+    const baseConfig = config(root, `node ${serverPath}`);
+    const cfg = { ...baseConfig, codex: { ...baseConfig.codex, linear_graphql_mcp: { ...baseConfig.codex.linear_graphql_mcp, enabled: false } } };
+    let executorCalls = 0;
+    const tracker = new FakeTracker([], [], [issue({ state: "Human Review" })]);
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const handle = new AgentRunHandle({
+      issue: issue(),
+      attempt: null,
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Implement {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      workspaceManager: manager,
+      tracker,
+      linearTool: {
+        async executeGraphql() {
+          executorCalls += 1;
+          return { success: true, body: {} };
+        }
+      },
+      logger: createLogger(() => undefined),
+      onEvent: () => undefined
+    });
+
+    const result = await handle.run();
+    const response = JSON.parse(await readFile(path.join(manager.workspacePath("ABC-1"), "tool-response.json"), "utf8")) as { result?: { success?: unknown; contentItems?: Array<{ text?: string }> } };
+
+    expect(result.ok).toBe(true);
+    expect(executorCalls).toBe(0);
+    expect(response.result?.success).toBe(false);
+    expect(response.result?.contentItems?.[0]?.text).toContain("GraphQL tool accepts exactly one operation");
+  });
+
+  test("redacts configured secrets from linear_graphql dynamic tool responses", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-agent-linear-tool-redaction-"));
+    const serverPath = path.join(root, "fake-codex-linear-tool-redaction.mjs");
+    await writeFile(serverPath, fakeLinearGraphqlToolServerSource());
+    await chmod(serverPath, 0o755);
+    const secret = "linear-secret-value";
+    const baseConfig = config(root, `node ${serverPath}`);
+    const cfg = {
+      ...baseConfig,
+      tracker: { ...baseConfig.tracker, api_key: secret },
+      codex: { ...baseConfig.codex, linear_graphql_mcp: { ...baseConfig.codex.linear_graphql_mcp, enabled: false } }
+    };
+    const tracker = new FakeTracker([], [], [issue({ state: "Human Review" })]);
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const handle = new AgentRunHandle({
+      issue: issue(),
+      attempt: null,
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Implement {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      workspaceManager: manager,
+      tracker,
+      linearTool: {
+        async executeGraphql() {
+          return { success: false, error: `transport included ${secret}`, body: { authorization: `Bearer ${secret}` } };
+        }
+      },
+      logger: createLogger(() => undefined),
+      onEvent: () => undefined
+    });
+
+    const result = await handle.run();
+    const response = JSON.parse(await readFile(path.join(manager.workspacePath("ABC-1"), "tool-response.json"), "utf8")) as { result?: { success?: unknown; contentItems?: Array<{ text?: string }> } };
+    const text = response.result?.contentItems?.[0]?.text ?? "";
+
+    expect(result.ok).toBe(true);
+    expect(response.result?.success).toBe(false);
+    expect(text).not.toContain(secret);
+    expect(text).toContain("[redacted]");
+    expect(text).toContain("transport included");
+  });
 });
 
 function config(root: string, command: string): SymphonyConfig {
@@ -351,6 +428,58 @@ rl.on("line", (line) => {
     setTimeout(() => {
       send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
       send({ id: "tool-1", method: "item/tool/call", params: { threadId: "thread-1", turnId: "turn-1", tool: "not_a_real_tool", arguments: {} } });
+    }, 10);
+  }
+  if (msg.id === "tool-1" && msg.result) {
+    writeFileSync("tool-response.json", JSON.stringify(msg));
+    send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "completed", error: null, startedAt: 1, completedAt: 2, durationMs: 1 } } });
+  }
+});
+`;
+}
+
+function fakeLinearGraphqlMultiOperationServerSource(): string {
+  const query = JSON.stringify('query A { viewer { id } } mutation B { issueUpdate(id: "x", input: {}) { success } }');
+  return `
+import { writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: { userAgent: "fake", codexHome: process.cwd(), platformFamily: "unix", platformOs: "test" } });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" }, cwd: process.cwd(), model: "fake", modelProvider: "fake", serviceTier: null, instructionSources: [], approvalPolicy: "never", approvalsReviewer: "client", sandbox: {}, reasoningEffort: null } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+    setTimeout(() => {
+      send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+      send({ id: "tool-1", method: "item/tool/call", params: { threadId: "thread-1", turnId: "turn-1", tool: "linear_graphql", arguments: { query: ${query} } } });
+    }, 10);
+  }
+  if (msg.id === "tool-1" && msg.result) {
+    writeFileSync("tool-response.json", JSON.stringify(msg));
+    send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "completed", error: null, startedAt: 1, completedAt: 2, durationMs: 1 } } });
+  }
+});
+`;
+}
+
+function fakeLinearGraphqlToolServerSource(): string {
+  const query = JSON.stringify("query Viewer { viewer { id } }");
+  return `
+import { writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: { userAgent: "fake", codexHome: process.cwd(), platformFamily: "unix", platformOs: "test" } });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" }, cwd: process.cwd(), model: "fake", modelProvider: "fake", serviceTier: null, instructionSources: [], approvalPolicy: "never", approvalsReviewer: "client", sandbox: {}, reasoningEffort: null } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+    setTimeout(() => {
+      send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+      send({ id: "tool-1", method: "item/tool/call", params: { threadId: "thread-1", turnId: "turn-1", tool: "linear_graphql", arguments: { query: ${query} } } });
     }, 10);
   }
   if (msg.id === "tool-1" && msg.result) {

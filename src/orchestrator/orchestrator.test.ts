@@ -124,6 +124,136 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("records dispatch decisions for skipped and dispatched candidates", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-dispatch-decisions-"));
+    const serverPath = path.join(root, "fake-codex-long-running.mjs");
+    await writeFile(serverPath, fakeLongRunningCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = config(root, `node ${serverPath}`);
+    const handoffIssue = issue({ id: "i-handoff", identifier: "SAM-40", priority: 0, title: "Already has PR" });
+    const blockedIssue = issue({
+      id: "i-blocked",
+      identifier: "SAM-41",
+      priority: 1,
+      title: "Blocked work",
+      blocked_by: [{ id: "i-upstream", identifier: "SAM-39", state: "Todo" }]
+    });
+    const runningIssue = issue({ id: "i-running-decision", identifier: "SAM-42", priority: 2, title: "Runs first" });
+    const noSlotIssue = issue({ id: "i-no-slot", identifier: "SAM-43", priority: 3, title: "Waits for a slot" });
+    const tracker = new FakeTracker([noSlotIssue, runningIssue, blockedIssue, handoffIssue], [], []);
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      logger: createLogger(() => undefined)
+    });
+    orchestrator.state.issue_history.set(handoffIssue.identifier, {
+      issue_id: handoffIssue.id,
+      issue_identifier: handoffIssue.identifier,
+      workspace_path: null,
+      restart_count: 0,
+      last_error: null,
+      run_attempts: [],
+      recent_events: [],
+      tracked: {
+        github_pull_request: {
+          number: 40,
+          url: "https://github.test/acme/widgets/pull/40",
+          branch: "takt/sam-40-already-has-pr",
+          title: "SAM-40: Already has PR",
+          created: true
+        }
+      }
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { running: number } }).counts.running === 1, "dispatch decision running worker");
+
+    const decisions = (orchestrator.snapshot() as {
+      dispatch_decisions: Array<{ issue_identifier: string | null; status: string; reason: string; message: string | null }>;
+    }).dispatch_decisions;
+    expect(decisions.map((decision) => [decision.issue_identifier, decision.status, decision.reason])).toEqual([
+      ["SAM-40", "skipped", "pull_request_handoff_exists"],
+      ["SAM-41", "skipped", "blocked_by_open_issue"],
+      ["SAM-42", "dispatched", "eligible"],
+      ["SAM-43", "skipped", "no_global_slots"]
+    ]);
+    expect(decisions.find((decision) => decision.issue_identifier === "SAM-41")?.message).toContain("SAM-39");
+    expect(orchestrator.issueSnapshot("SAM-41")).toMatchObject({
+      status: "skipped",
+      dispatch_decisions: [{ reason: "blocked_by_open_issue" }]
+    });
+    await orchestrator.stop();
+  });
+
+  test("records dispatch validation failures as system dispatch decisions", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-dispatch-validation-"));
+    const cfg = config(root, "node missing.js");
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "body", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => {
+        throw new Error("missing tracker token");
+      },
+      tracker: new FakeTracker([issue({ identifier: "SAM-44" })], [], []),
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+
+    expect(orchestrator.snapshot()).toMatchObject({
+      dispatch_decisions: [
+        {
+          issue_id: null,
+          issue_identifier: null,
+          status: "blocked",
+          reason: "dispatch_validation_failed",
+          message: "missing tracker token"
+        }
+      ]
+    });
+    await orchestrator.stop();
+  });
+
+  test("records candidate fetch failures as system dispatch decisions", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-candidate-fetch-failure-"));
+    const cfg = config(root, "node missing.js");
+    const tracker = new (class extends FakeTracker {
+      override async fetchCandidateIssues() {
+        this.candidateCalls += 1;
+        throw new Error("Linear unavailable");
+      }
+    })();
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "body", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+
+    expect(tracker.candidateCalls).toBe(1);
+    expect(orchestrator.snapshot()).toMatchObject({
+      counts: { running: 0 },
+      dispatch_decisions: [
+        {
+          issue_id: null,
+          issue_identifier: null,
+          status: "blocked",
+          reason: "candidate_fetch_failed",
+          message: "Linear unavailable"
+        }
+      ]
+    });
+    await orchestrator.stop();
+  });
+
   test("Todo issue with terminal blockers remains eligible", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-terminal-blocker-"));
     const serverPath = path.join(root, "fake-codex.mjs");
@@ -172,6 +302,7 @@ describe("orchestrator", () => {
 
     await orchestrator.tick();
     await waitFor(() => (orchestrator.snapshot() as { counts: { running: number } }).counts.running === 2, "long-running dispatches");
+    await new Promise((resolve) => setTimeout(resolve, 5));
 
     tracker.byIds = [
       issue({ id: terminalIssue.id, identifier: terminalIssue.identifier, state: "Done" }),
@@ -234,6 +365,69 @@ describe("orchestrator", () => {
       last_error: "stalled session",
       attempts: { run_attempts: [{ status: "failed", error: "stalled session" }] }
     });
+    await orchestrator.stop();
+  });
+
+  test("prompt render failures are retried without launching Codex", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-prompt-failure-"));
+    const serverPath = path.join(root, "fake-codex-launch-marker.mjs");
+    const launchMarker = path.join(root, "codex-launched");
+    await writeFile(serverPath, fakeLaunchMarkerCodexServerSource(launchMarker));
+    await chmod(serverPath, 0o755);
+    const cfg = config(root, `node ${serverPath}`);
+    const badPromptIssue = issue({ id: "i-prompt-error", identifier: "SAM-45", state: "Todo", title: "Bad prompt" });
+    const tracker = new FakeTracker([badPromptIssue], [], []);
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ missing.value }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "retry after prompt render failure");
+
+    expect(orchestrator.issueSnapshot("SAM-45")).toMatchObject({
+      status: "retrying",
+      last_error: "Failed to render workflow prompt",
+      attempts: { run_attempts: [{ status: "failed", error: "Failed to render workflow prompt" }] }
+    });
+    await expect(access(launchMarker)).rejects.toMatchObject({ code: "ENOENT" });
+    await orchestrator.stop();
+  });
+
+  test("before_run hook failures are retried without launching Codex", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-hook-failure-"));
+    const serverPath = path.join(root, "fake-codex-launch-marker.mjs");
+    const launchMarker = path.join(root, "codex-launched");
+    await writeFile(serverPath, fakeLaunchMarkerCodexServerSource(launchMarker));
+    await chmod(serverPath, 0o755);
+    const baseConfig = config(root, `node ${serverPath}`);
+    const cfg = { ...baseConfig, hooks: { ...baseConfig.hooks, before_run: "printf hook-failed >&2; exit 13" } };
+    const hookIssue = issue({ id: "i-hook-error", identifier: "SAM-46", state: "Todo", title: "Bad hook" });
+    const tracker = new FakeTracker([hookIssue], [], []);
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "retry after before_run hook failure");
+
+    expect(orchestrator.issueSnapshot("SAM-46")).toMatchObject({
+      status: "retrying",
+      attempts: { run_attempts: [{ status: "failed" }] }
+    });
+    const snapshot = orchestrator.issueSnapshot("SAM-46") as { last_error?: string | null };
+    expect(snapshot.last_error).toContain("Runtime hook before_run exited code=13");
+    expect(snapshot.last_error).toContain("hook-failed");
+    await expect(access(launchMarker)).rejects.toMatchObject({ code: "ENOENT" });
     await orchestrator.stop();
   });
 
@@ -526,6 +720,62 @@ describe("orchestrator", () => {
     expect(
       (orchestrator.snapshot() as { recent_events: Array<{ event: string; message?: string | null }> }).recent_events.some(
         (event) => event.event === "pull_request_publish_failed" && event.message === "TAKT_EVIDENCE.json must contain valid JSON"
+      )
+    ).toBe(true);
+    await orchestrator.stop();
+  });
+
+  test("fails PR publication visibly when worker PR-ready manifest is incomplete", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-bad-ready-"));
+    const serverPath = path.join(root, "fake-codex-bad-ready.mjs");
+    await writeFile(serverPath, fakeIncompletePrReadyCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = {
+      ...config(root, `node ${serverPath}`),
+      tracker: {
+        ...config(root, `node ${serverPath}`).tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-pr-bad-ready", identifier: "SAM-25", state: "Todo", title: "Bad PR-ready manifest" });
+    const tracker = new LocalTracker([activeIssue]);
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        return { number: 25, url: "https://github.test/acme/widgets/pull/25", branch: "takt/sam-25-bad-pr-ready-manifest", title: "SAM-25: Bad PR-ready manifest", created: true };
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      pullRequestPublisher: publisher,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "retry after incomplete PR-ready manifest");
+
+    expect(published).toHaveLength(0);
+    expect(tracker.getIssue("i-pr-bad-ready")?.state).toBe("In Progress");
+    expect(orchestrator.issueSnapshot("SAM-25")).toMatchObject({
+      status: "retrying",
+      last_error: "PR-ready manifest requires verification as a non-empty list of strings"
+    });
+    expect(
+      (orchestrator.snapshot() as { recent_events: Array<{ event: string; message?: string | null }> }).recent_events.some(
+        (event) => event.event === "pull_request_publish_failed" && event.message === "PR-ready manifest requires verification as a non-empty list of strings"
       )
     ).toBe(true);
     await orchestrator.stop();
@@ -1690,6 +1940,28 @@ rl.on("line", (line) => {
 `;
 }
 
+function fakeIncompletePrReadyCodexServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+import { writeFileSync } from "node:fs";
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: {} });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" } } });
+  if (msg.method === "turn/start") {
+    send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
+    setTimeout(() => {
+      writeFileSync("TAKT_PR_READY.json", JSON.stringify({ title: "SAM-25: Bad PR-ready manifest", summary: "Done", risk: "Low" }));
+      send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
+      send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+    }, 10);
+  }
+});
+`;
+}
+
 function failingInspection(): PullRequestInspection {
   return {
     number: 10,
@@ -2196,6 +2468,21 @@ rl.on("line", (line) => {
     send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
     send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
   }
+});
+`;
+}
+
+function fakeLaunchMarkerCodexServerSource(markerPath: string): string {
+  return `
+import { createInterface } from "node:readline";
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(markerPath)}, "launched");
+const rl = createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") send({ id: msg.id, result: {} });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "thread-1" } } });
 });
 `;
 }

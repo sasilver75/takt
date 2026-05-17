@@ -51,6 +51,7 @@ export type LinearGraphqlBridgeStartOptions = {
   bindHost?: string | undefined;
   publicHost?: string | undefined;
   bearerToken?: string | null | undefined;
+  secretValues?: string[] | undefined;
   logger: Logger;
   onEvent: (event: CodexRuntimeEvent) => void;
   maxBodyBytes?: number;
@@ -114,7 +115,7 @@ export async function startLinearGraphqlBridge(options: LinearGraphqlBridgeStart
 
 export async function executeLinearGraphqlBridgeRequest(
   request: LinearGraphqlBridgeRequest,
-  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent" | "bearerToken">
+  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent" | "bearerToken" | "secretValues">
 ): Promise<LinearGraphqlBridgeResponse> {
   if (request.pathname !== MCP_ENDPOINT) return response(404, rpcError(null, -32004, "Not found"));
   if (!isAllowedOrigin(request.origin)) return response(403, rpcError(null, -32003, "Forbidden origin"));
@@ -143,7 +144,7 @@ export async function executeLinearGraphqlBridgeRequest(
 
 async function handleMcpRequest(
   message: Record<string, unknown>,
-  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent">
+  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent" | "bearerToken" | "secretValues">
 ): Promise<Record<string, unknown>> {
   const id = message.id;
   const method = message.method;
@@ -164,25 +165,25 @@ async function handleMcpRequest(
 
 async function callTool(
   params: Record<string, unknown>,
-  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent">
+  options: Pick<LinearGraphqlBridgeStartOptions, "executor" | "issue" | "projectSlug" | "onEvent" | "bearerToken" | "secretValues">
 ): Promise<Record<string, unknown>> {
   if (params.name !== "linear_graphql") {
-    return toolResult({ success: false, error: `Unsupported tool: ${String(params.name || "")}` }, true);
+    return toolResult({ success: false, error: `Unsupported tool: ${String(params.name || "")}` }, true, bridgeSecretValues(options));
   }
-  if (!options.executor) return toolResult({ success: false, error: "Linear GraphQL executor is unavailable" }, true);
+  if (!options.executor) return toolResult({ success: false, error: "Linear GraphQL executor is unavailable" }, true, bridgeSecretValues(options));
   const args = params.arguments;
   const query = typeof args === "string" ? args : objectAt(params, "arguments").query;
   const variables = typeof args === "object" && args && !Array.isArray(args) ? objectAt(args as Record<string, unknown>, "variables") : {};
   if (typeof query !== "string" || !query.trim()) {
-    return toolResult({ success: false, error: "linear_graphql query is required", context: contextPayload(options) }, true);
+    return toolResult({ success: false, error: "linear_graphql query is required", context: contextPayload(options) }, true, bridgeSecretValues(options));
   }
   if (!variables || typeof variables !== "object" || Array.isArray(variables)) {
-    return toolResult({ success: false, error: "linear_graphql variables must be an object", context: contextPayload(options) }, true);
+    return toolResult({ success: false, error: "linear_graphql variables must be an object", context: contextPayload(options) }, true, bridgeSecretValues(options));
   }
   try {
     validateSingleOperation(query);
   } catch (error) {
-    return toolResult({ success: false, error: errorMessage(error), context: contextPayload(options) }, true);
+    return toolResult({ success: false, error: errorMessage(error), context: contextPayload(options) }, true, bridgeSecretValues(options));
   }
 
   const started = Date.now();
@@ -195,7 +196,7 @@ async function callTool(
   return toolResult({
     ...result,
     context: contextPayload(options)
-  }, !result.success);
+  }, !result.success, bridgeSecretValues(options));
 }
 
 function contextPayload(options: Pick<LinearGraphqlBridgeStartOptions, "issue" | "projectSlug">): Record<string, string | null> {
@@ -206,9 +207,9 @@ function contextPayload(options: Pick<LinearGraphqlBridgeStartOptions, "issue" |
   };
 }
 
-function toolResult(payload: Record<string, unknown>, isError: boolean): Record<string, unknown> {
+function toolResult(payload: Record<string, unknown>, isError: boolean, secretValues: string[] = []): Record<string, unknown> {
   return {
-    content: [{ type: "text", text: JSON.stringify(payload) }],
+    content: [{ type: "text", text: redactText(JSON.stringify(payload), secretValues) }],
     isError
   };
 }
@@ -238,7 +239,7 @@ async function handleHttpRequest(
     const message = error instanceof BodyTooLargeError ? "Request body is too large" : "Linear GraphQL bridge failed";
     options.logger.warn("linear graphql bridge request failed", {
       issue_identifier: options.issue.identifier,
-      error: errorMessage(error)
+      error: redactText(errorMessage(error), bridgeSecretValues(options))
     });
     writeJson(responseWriter, statusCode, rpcError(null, -32603, message));
   }
@@ -308,6 +309,14 @@ function isAllowedOrigin(origin: string | null): boolean {
 function isAllowedAuthorization(header: string | null, bearerToken: string | null): boolean {
   if (!bearerToken) return true;
   return header === `Bearer ${bearerToken}`;
+}
+
+function bridgeSecretValues(options: Pick<LinearGraphqlBridgeStartOptions, "bearerToken" | "secretValues">): string[] {
+  return [options.bearerToken, ...(options.secretValues ?? [])].filter((value): value is string => typeof value === "string" && value.length > 8);
+}
+
+function redactText(value: string, secretValues: string[]): string {
+  return secretValues.reduce((text, secret) => text.split(secret).join("[redacted]"), value);
 }
 
 class BodyTooLargeError extends Error {

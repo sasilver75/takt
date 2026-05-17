@@ -26,6 +26,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     const config = this.getConfig().github;
     if (!config.enabled) throw new SymphonyError("github_disabled", "GitHub publishing is disabled");
     if (!config.owner || !config.repo || !config.token) throw new SymphonyError("github_not_configured", "GitHub publishing is not fully configured");
+    validatePrReadyManifest(input.manifest);
 
     const branch = branchName(config.branch_prefix, input.issue);
     await ensureHandoffManifestsUntracked(input.workspacePath, [config.pr_ready_file, config.evidence_file]);
@@ -119,6 +120,31 @@ export function renderPullRequestBody(issue: Issue, manifest: PrReadyManifest): 
     "## Risk",
     manifest.risk?.trim() || "Not provided."
   ].join("\n");
+}
+
+export function validatePrReadyManifest(manifest: PrReadyManifest): void {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new SymphonyError("invalid_pr_ready_manifest", "PR-ready manifest must be a JSON object");
+  }
+  const record = manifest as Record<string, unknown>;
+  for (const field of ["title", "summary", "body", "risk"]) {
+    if (record[field] !== undefined && typeof record[field] !== "string") {
+      throw new SymphonyError("invalid_pr_ready_manifest", `PR-ready manifest field ${field} must be a string`);
+    }
+  }
+  if (!nonEmptyString(record.summary) && !nonEmptyString(record.body)) {
+    throw new SymphonyError("invalid_pr_ready_manifest", "PR-ready manifest requires a non-empty summary or body");
+  }
+  if (!Array.isArray(record.verification) || record.verification.length === 0 || !record.verification.every(nonEmptyString)) {
+    throw new SymphonyError("invalid_pr_ready_manifest", "PR-ready manifest requires verification as a non-empty list of strings");
+  }
+  if (!nonEmptyString(record.risk)) {
+    throw new SymphonyError("invalid_pr_ready_manifest", "PR-ready manifest requires a non-empty risk field");
+  }
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 export function branchName(prefix: string, issue: Issue): string {

@@ -118,6 +118,7 @@ function renderDashboard(snapshot: unknown): string {
     codex_totals?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; seconds_running?: number };
     running?: Array<{ issue_identifier: string; state: string; last_event: string | null; turn_count: number }>;
     retrying?: Array<{ issue_identifier: string; attempt: number; due_at: string; error: string | null }>;
+    dispatch_decisions?: Array<{ at: string; issue_identifier: string | null; state: string | null; status: string; reason: string; message: string | null }>;
     recent_events?: Array<{ at: string; event: string; issue_identifier?: string; session_id?: string | null; message?: string | null }>;
     pull_requests?: Array<{
       issue_identifier: string;
@@ -141,6 +142,9 @@ function renderDashboard(snapshot: unknown): string {
     .join("");
   const retryRows = (state.retrying ?? [])
     .map((row) => `<tr><td>${issueDrilldownLink(row.issue_identifier)}</td><td>${row.attempt}</td><td>${escapeHtml(row.due_at)}</td><td>${escapeHtml(row.error ?? "")}</td></tr>`)
+    .join("");
+  const dispatchRows = (state.dispatch_decisions ?? [])
+    .map((row) => `<tr><td>${escapeHtml(row.at)}</td><td>${row.issue_identifier ? issueDrilldownLink(row.issue_identifier) : ""}</td><td>${escapeHtml(row.state ?? "")}</td><td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.reason)}</td><td>${escapeHtml(row.message ?? "")}</td></tr>`)
     .join("");
   const prRows = (state.pull_requests ?? [])
     .map((row) => {
@@ -188,6 +192,7 @@ function renderDashboard(snapshot: unknown): string {
     </div>
     <section><h2>Running</h2><table><thead><tr><th>Issue</th><th>State</th><th>Turns</th><th>Last Event</th></tr></thead><tbody>${runningRows}</tbody></table></section>
     <section><h2>Retry Queue</h2><table><thead><tr><th>Issue</th><th>Attempt</th><th>Due</th><th>Error</th></tr></thead><tbody>${retryRows}</tbody></table></section>
+    <section><h2>Dispatch Decisions</h2><table><thead><tr><th>Time</th><th>Issue</th><th>State</th><th>Status</th><th>Reason</th><th>Message</th></tr></thead><tbody>${dispatchRows}</tbody></table></section>
     <section><h2>Pull Requests</h2><table><thead><tr><th>Issue</th><th>PR</th><th>State</th><th>Checks</th><th>Review</th><th>Evidence</th><th>Summary</th></tr></thead><tbody>${prRows}</tbody></table></section>
     <section><h2>Recent Events</h2><table><thead><tr><th>Time</th><th>Event</th><th>Issue</th><th>Session</th><th>Message</th></tr></thead><tbody>${eventRows}</tbody></table></section>
   </main>
@@ -255,6 +260,7 @@ function renderIssuePage(snapshot: unknown): string {
   </header>
   <main>
     <section><h2>Issue</h2>${renderIssueDefinitionList(issue)}</section>
+    <section><h2>Dispatch Decisions</h2>${renderIssueDispatchDecisions(issue)}</section>
     <section><h2>Run Attempts</h2>${renderRunAttempts(issue)}</section>
     <section><h2>Pull Request</h2>${renderPullRequestDetails(pullRequest, pullRequestStatus, tracked)}</section>
     <section><h2>Evidence</h2>${renderIssueEvidenceDetails(issue, evidence, tracked)}</section>
@@ -272,6 +278,7 @@ type IssuePageSnapshot = {
   attempts?: { restart_count?: number; current_retry_attempt?: number | null; run_attempts?: RunAttemptPageRecord[]; history?: RunAttemptPageRecord[] } | null;
   running?: { session_id?: string | null; turn_count?: number; last_event?: string | null; last_message?: string | null; last_event_at?: string | null } | null;
   retry?: { attempt?: number; due_at?: string; error?: string | null; context?: string | null } | null;
+  dispatch_decisions?: Array<{ at?: string; state?: string | null; status?: string; reason?: string; message?: string | null }>;
   recent_events?: Array<{ at?: string; event?: string; session_id?: string | null; message?: string | null }>;
   last_error?: string | null;
   tracked?: Record<string, unknown>;
@@ -302,6 +309,20 @@ function renderIssueDefinitionList(issue: IssuePageSnapshot): string {
     <dt>Last Event</dt><dd>${escapeHtml(issue.running?.last_event ?? "")}</dd>
     <dt>Last Error</dt><dd>${escapeHtml(issue.last_error ?? "")}</dd>
   </dl>`;
+}
+
+function renderIssueDispatchDecisions(issue: IssuePageSnapshot): string {
+  const decisions = issue.dispatch_decisions ?? [];
+  if (decisions.length === 0) return "<p>No dispatch decisions have been recorded for this issue in the latest poll.</p>";
+  const rows = decisions
+    .slice(-20)
+    .reverse()
+    .map(
+      (decision) =>
+        `<tr><td>${escapeHtml(decision.at ?? "")}</td><td>${escapeHtml(decision.state ?? "")}</td><td>${escapeHtml(decision.status ?? "")}</td><td>${escapeHtml(decision.reason ?? "")}</td><td>${escapeHtml(decision.message ?? "")}</td></tr>`
+    )
+    .join("");
+  return `<table><thead><tr><th>Time</th><th>State</th><th>Status</th><th>Reason</th><th>Message</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderRunAttempts(issue: IssuePageSnapshot): string {

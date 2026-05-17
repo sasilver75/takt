@@ -58,6 +58,9 @@ export class AgentRunHandle {
       const runtime = createWorkerRuntime(config, workspace, this.options.issue, this.options.logger);
       this.runtime = runtime;
       await runtime.runHook("before_run", config.hooks.before_run, config.hooks.timeout_ms);
+      let turnNumber = 1;
+      let issue = this.options.issue;
+      const firstTurnPrompt = await renderIssuePrompt(this.options.getWorkflow(), issue, this.options.attempt, this.options.followupContext ?? null, config.target);
       if (config.codex.linear_graphql_mcp.enabled) {
         const bridgeFactory = this.options.linearBridgeFactory ?? startLinearGraphqlBridge;
         bridge = await bridgeFactory({
@@ -67,6 +70,7 @@ export class AgentRunHandle {
           bindHost: runtime.bridgeBindHost,
           publicHost: runtime.bridgePublicHost,
           bearerToken: runtime.bridgeBearerToken,
+          secretValues: [config.tracker.api_key, config.github.token].filter((value): value is string => typeof value === "string"),
           logger: this.options.logger,
           onEvent: this.options.onEvent
         });
@@ -84,13 +88,8 @@ export class AgentRunHandle {
       await client.start();
       await client.startThread();
 
-      let turnNumber = 1;
-      let issue = this.options.issue;
       for (;;) {
-        const prompt =
-          turnNumber === 1
-            ? await renderIssuePrompt(this.options.getWorkflow(), issue, this.options.attempt, this.options.followupContext ?? null, config.target)
-            : continuationPrompt(turnNumber, this.options.getConfig().agent.max_turns);
+        const prompt = turnNumber === 1 ? firstTurnPrompt : continuationPrompt(turnNumber, this.options.getConfig().agent.max_turns);
         await client.runTurn(prompt);
         if (await isPrReady(workspace.path, this.options.getConfig())) break;
         const refreshed = await this.options.tracker.fetchIssueStatesByIds([issue.id]);

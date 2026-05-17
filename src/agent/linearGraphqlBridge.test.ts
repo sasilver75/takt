@@ -152,6 +152,47 @@ describe("linear GraphQL loopback MCP bridge", () => {
       )
     ).resolves.toMatchObject({ statusCode: 200, body: { id: 2, result: { tools: [{ name: "linear_graphql" }] } } });
   });
+
+  test("redacts configured secrets from tool result payloads", async () => {
+    const linearSecret = "linear-secret-value";
+    const bridgeToken = "bridge-secret-token";
+    const executor: GraphqlToolExecutor = {
+      async executeGraphql() {
+        return {
+          success: false,
+          error: `transport included ${linearSecret}`,
+          body: { authorization: `Bearer ${bridgeToken}` }
+        };
+      }
+    };
+    const options = {
+      executor,
+      issue: testIssue,
+      projectSlug: "takt",
+      bearerToken: bridgeToken,
+      secretValues: [linearSecret],
+      onEvent: () => undefined
+    };
+
+    const result = await executeLinearGraphqlBridgeRequest(
+      {
+        ...request("POST", "/mcp", {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name: "linear_graphql", arguments: { query: "query Viewer { viewer { id } }" } }
+        }),
+        authorization: `Bearer ${bridgeToken}`
+      },
+      options
+    );
+
+    const text = String(((result.body?.result as any).content[0] as any).text);
+    expect(text).not.toContain(linearSecret);
+    expect(text).not.toContain(bridgeToken);
+    expect(text).toContain("[redacted]");
+    expect(text).toContain("transport included");
+  });
 });
 
 function request(method: string, pathname: string, body: unknown) {

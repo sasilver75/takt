@@ -414,7 +414,20 @@ export type RuntimeState = {
   codex_totals: TokenTotals & { seconds_running: number };
   codex_rate_limits: unknown;
   recent_events: RuntimeEvent[];
+  dispatch_decisions: DispatchDecision[];
   issue_history: Map<string, IssueDebugRecord>;
+};
+
+export type DispatchDecisionStatus = "dispatched" | "skipped" | "blocked";
+
+export type DispatchDecision = {
+  at: string;
+  issue_id: string | null;
+  issue_identifier: string | null;
+  state: string | null;
+  status: DispatchDecisionStatus;
+  reason: string;
+  message: string | null;
 };
 
 export type RuntimeEvent = {

@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   CodexRuntimeEvent,
+  DispatchDecision,
+  DispatchDecisionStatus,
   DiscoveredPullRequest,
   DurableStateSnapshot,
   DurableStateStore,
@@ -34,6 +36,7 @@ import type { Logger } from "../observability/logger.js";
 import { WorkspaceManager } from "../workspace/manager.js";
 import { AgentRunHandle } from "../agent/runner.js";
 import type { LinearGraphqlBridgeHandle, LinearGraphqlBridgeStartOptions } from "../agent/linearGraphqlBridge.js";
+import { validatePrReadyManifest } from "../github/publisher.js";
 
 export type OrchestratorOptions = {
   getConfig: () => SymphonyConfig;
@@ -75,6 +78,7 @@ export class Orchestrator {
       codex_totals: { input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0 },
       codex_rate_limits: null,
       recent_events: [],
+      dispatch_decisions: [],
       issue_history: new Map()
     };
   }
@@ -116,12 +120,15 @@ export class Orchestrator {
   async tick(): Promise<void> {
     if (this.ticking || this.stopped) return;
     this.ticking = true;
+    this.state.dispatch_decisions = [];
     try {
       await this.reconcileLifecycle();
       try {
         await this.options.validateDispatch();
       } catch (error) {
-        this.options.logger.error("dispatch validation failed", { error: errorMessage(error) });
+        const message = errorMessage(error);
+        this.options.logger.error("dispatch validation failed", { error: message });
+        this.recordDispatchDecision(systemDispatchDecision("blocked", "dispatch_validation_failed", message));
         return;
       }
 
@@ -129,13 +136,20 @@ export class Orchestrator {
       try {
         issues = await this.options.tracker.fetchCandidateIssues();
       } catch (error) {
-        this.options.logger.error("candidate fetch failed", { error: errorMessage(error) });
+        const message = errorMessage(error);
+        this.options.logger.error("candidate fetch failed", { error: message });
+        this.recordDispatchDecision(systemDispatchDecision("blocked", "candidate_fetch_failed", message));
         return;
       }
 
       for (const issue of sortForDispatch(issues)) {
-        if (this.availableGlobalSlots() <= 0) break;
-        if (this.shouldDispatch(issue)) await this.dispatchIssue(issue, null, null);
+        const eligibility = this.dispatchEligibility(issue);
+        if (!eligibility.eligible) {
+          this.recordDispatchDecision(dispatchDecisionForIssue(issue, "skipped", eligibility.reason, eligibility.message));
+          continue;
+        }
+        this.recordDispatchDecision(dispatchDecisionForIssue(issue, "dispatched", "eligible", null));
+        await this.dispatchIssue(issue, null, null);
       }
     } finally {
       this.ticking = false;
@@ -202,6 +216,7 @@ export class Orchestrator {
       retrying,
       pull_requests: pullRequests,
       recent_events: this.state.recent_events.slice(-config.observability.recent_event_limit),
+      dispatch_decisions: this.state.dispatch_decisions,
       codex_totals: {
         ...this.state.codex_totals,
         seconds_running: this.state.codex_totals.seconds_running + activeSeconds
@@ -215,11 +230,13 @@ export class Orchestrator {
     const running = [...this.state.running.values()].find((entry) => entry.identifier === identifier);
     const retry = [...this.state.retry_attempts.values()].find((entry) => entry.identifier === identifier) ?? null;
     const record = this.state.issue_history.get(identifier);
-    if (!running && !retry && !record) return null;
+    const dispatchDecisions = this.state.dispatch_decisions.filter((decision) => decision.issue_identifier === identifier);
+    if (!running && !retry && !record && dispatchDecisions.length === 0) return null;
+    const lastDecision = dispatchDecisions.at(-1);
     return {
       issue_identifier: identifier,
-      issue_id: running?.issue.id ?? retry?.issue_id ?? record?.issue_id,
-      status: running ? "running" : retry ? "retrying" : record && this.state.completed.has(record.issue_id) ? "completed" : "known",
+      issue_id: running?.issue.id ?? retry?.issue_id ?? record?.issue_id ?? lastDecision?.issue_id ?? undefined,
+      status: running ? "running" : retry ? "retrying" : record && this.state.completed.has(record.issue_id) ? "completed" : lastDecision?.status === "skipped" ? "skipped" : "known",
       workspace: { path: running?.workspace_path ?? record?.workspace_path ?? null },
       attempts: {
         restart_count: record?.restart_count ?? 0,
@@ -243,6 +260,7 @@ export class Orchestrator {
           }
         : null,
       retry,
+      dispatch_decisions: dispatchDecisions,
       logs: { codex_session_logs: [] },
       recent_events: record?.recent_events.slice(-config.observability.issue_event_limit) ?? [],
       last_error: record?.last_error ?? null,
@@ -623,19 +641,41 @@ export class Orchestrator {
     }
   }
 
-  private shouldDispatch(issue: Issue): boolean {
-    if (!issue.id || !issue.identifier || !issue.title || !issue.state) return false;
-    if (!isActiveState(issue.state, this.options.getConfig())) return false;
-    if (isTerminalState(issue.state, this.options.getConfig())) return false;
-    if (this.hasTrackedPullRequestHandoff(issue)) return false;
-    if (this.state.running.has(issue.id) || this.state.claimed.has(issue.id)) return false;
-    if (this.availableGlobalSlots() <= 0) return false;
-    if (this.availableStateSlots(issue.state) <= 0) return false;
+  private dispatchEligibility(issue: Issue): DispatchEligibility {
+    if (!issue.id) return { eligible: false, reason: "missing_issue_id", message: "Issue is missing id" };
+    if (!issue.identifier) return { eligible: false, reason: "missing_issue_identifier", message: "Issue is missing identifier" };
+    if (!issue.title) return { eligible: false, reason: "missing_issue_title", message: "Issue is missing title" };
+    if (!issue.state) return { eligible: false, reason: "missing_issue_state", message: "Issue is missing state" };
+    if (!isActiveState(issue.state, this.options.getConfig())) {
+      return { eligible: false, reason: "state_not_active", message: `${issue.state} is not in tracker.active_states` };
+    }
+    if (isTerminalState(issue.state, this.options.getConfig())) {
+      return { eligible: false, reason: "state_terminal", message: `${issue.state} is in tracker.terminal_states` };
+    }
+    if (this.hasTrackedPullRequestHandoff(issue)) {
+      return { eligible: false, reason: "pull_request_handoff_exists", message: "A managed PR is already tracked for this issue" };
+    }
+    if (this.state.running.has(issue.id)) return { eligible: false, reason: "already_running", message: "Issue already has a running worker" };
+    if (this.state.claimed.has(issue.id)) return { eligible: false, reason: "already_claimed", message: "Issue is already claimed or retrying" };
+    if (this.availableGlobalSlots() <= 0) {
+      return { eligible: false, reason: "no_global_slots", message: "Global worker concurrency limit is exhausted" };
+    }
+    if (this.availableStateSlots(issue.state) <= 0) {
+      return { eligible: false, reason: "no_state_slots", message: `Worker concurrency limit is exhausted for state ${issue.state}` };
+    }
     if (normalizeState(issue.state) === "todo") {
       const terminalStates = new Set(this.options.getConfig().tracker.terminal_states.map(normalizeState));
-      if (issue.blocked_by.some((blocker) => !blocker.state || !terminalStates.has(normalizeState(blocker.state)))) return false;
+      const blockers = issue.blocked_by.filter((blocker) => !blocker.state || !terminalStates.has(normalizeState(blocker.state)));
+      if (blockers.length > 0) {
+        const blockerNames = blockers.map((blocker) => blocker.identifier ?? blocker.id ?? "unknown").join(", ");
+        return { eligible: false, reason: "blocked_by_open_issue", message: `Open blockers: ${blockerNames}` };
+      }
     }
-    return true;
+    return { eligible: true };
+  }
+
+  private shouldDispatch(issue: Issue): boolean {
+    return this.dispatchEligibility(issue).eligible;
   }
 
   private async dispatchIssue(issue: Issue, attempt: number | null, followupContext: string | null): Promise<void> {
@@ -1214,6 +1254,10 @@ export class Orchestrator {
     this.persistState();
   }
 
+  private recordDispatchDecision(decision: DispatchDecision): void {
+    this.state.dispatch_decisions.push(decision);
+  }
+
   private persistState(): void {
     const store = this.options.durableStore;
     if (!store) return;
@@ -1265,6 +1309,32 @@ export function sortForDispatch(issues: Issue[]): Issue[] {
   });
 }
 
+type DispatchEligibility = { eligible: true } | { eligible: false; reason: string; message: string };
+
+function dispatchDecisionForIssue(issue: Issue, status: DispatchDecisionStatus, reason: string, message: string | null): DispatchDecision {
+  return {
+    at: new Date().toISOString(),
+    issue_id: issue.id || null,
+    issue_identifier: issue.identifier || null,
+    state: issue.state || null,
+    status,
+    reason,
+    message
+  };
+}
+
+function systemDispatchDecision(status: DispatchDecisionStatus, reason: string, message: string | null): DispatchDecision {
+  return {
+    at: new Date().toISOString(),
+    issue_id: null,
+    issue_identifier: null,
+    state: null,
+    status,
+    reason,
+    message
+  };
+}
+
 function nextAttempt(current: number | null): number {
   return current === null ? 1 : current + 1;
 }
@@ -1276,9 +1346,17 @@ function trimArray<T>(values: T[], limit: number): void {
 async function readPrReadyManifest(workspacePath: string, fileName: string): Promise<PrReadyManifest | null> {
   try {
     const raw = await readFile(path.join(workspacePath, fileName), "utf8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("manifest must be a JSON object");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch (error) {
+      throw new SymphonyError("invalid_pr_ready_manifest", `${fileName} must contain valid JSON`, error);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new SymphonyError("invalid_pr_ready_manifest", `${fileName} must be a JSON object`);
+    }
     const record = parsed as Record<string, unknown>;
+    validatePrReadyManifest(record as PrReadyManifest);
     return {
       ...(typeof record.title === "string" ? { title: record.title } : {}),
       ...(typeof record.summary === "string" ? { summary: record.summary } : {}),

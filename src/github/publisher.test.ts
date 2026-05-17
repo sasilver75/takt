@@ -182,6 +182,28 @@ describe("GitHub PR publisher", () => {
       message: "Handoff manifest files must not be committed: TAKT_PR_READY.json"
     });
   });
+
+  test("rejects incomplete PR-ready manifests before git or GitHub side effects", async () => {
+    const temp = await mkdtemp(path.join(os.tmpdir(), "takt-gh-invalid-pr-ready-"));
+    const publisher = new GitHubPullRequestPublisher(
+      () => config(temp, "origin"),
+      createLogger(() => undefined),
+      async () => {
+        throw new Error("GitHub API should not be called");
+      }
+    );
+
+    await expect(
+      publisher.publish({
+        issue: issue({ identifier: "SAM-124", title: "Validate manifest", url: "https://linear.test/SAM-124" }),
+        workspacePath: temp,
+        manifest: { summary: "Implemented the change.", risk: "Low" }
+      })
+    ).rejects.toMatchObject({
+      code: "invalid_pr_ready_manifest",
+      message: "PR-ready manifest requires verification as a non-empty list of strings"
+    });
+  });
 });
 
 function config(root: string, remote: string): SymphonyConfig {

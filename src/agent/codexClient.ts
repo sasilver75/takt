@@ -5,6 +5,7 @@ import { SymphonyError, errorMessage } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import type { WorkerRuntimeLease } from "../runtime/workerRuntime.js";
 import { prepareLinearGraphqlMcp, type LinearGraphqlMcpBridgeConfig } from "./linearGraphqlMcp.js";
+import { validateSingleOperation } from "../tracker/linear.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -217,7 +218,7 @@ export class CodexAppServerClient {
         this.emit("unsupported_tool_call", { message: method });
       }
     } catch (error) {
-      result = { contentItems: [{ type: "inputText", text: errorMessage(error) }], success: false };
+      result = { contentItems: [{ type: "inputText", text: redactText(errorMessage(error), this.secretValues()) }], success: false };
     }
     this.child?.stdin.write(`${JSON.stringify({ id, result })}\n`);
   }
@@ -247,7 +248,7 @@ export class CodexAppServerClient {
     }
     const result = await this.options.linearTool.executeGraphql(parsed.query, parsed.variables);
     this.emit("linear_graphql_tool_call", { message: `dynamic success=${result.success}` });
-    return { contentItems: [{ type: "inputText", text: JSON.stringify(result) }], success: result.success };
+    return { contentItems: [{ type: "inputText", text: redactText(JSON.stringify(result), this.secretValues()) }], success: result.success };
   }
 
   private handleNotification(message: JsonObject): void {
@@ -408,12 +409,16 @@ function mcpElicitationMessage(params: unknown): string {
 }
 
 function parseLinearToolArgs(value: unknown): { query: string; variables: Record<string, unknown> } {
-  if (typeof value === "string") return { query: value, variables: {} };
+  if (typeof value === "string") {
+    validateSingleOperation(value);
+    return { query: value, variables: {} };
+  }
   if (!value || typeof value !== "object") throw new SymphonyError("linear_graphql_invalid_input", "linear_graphql arguments must be an object or query string");
   const data = value as Record<string, unknown>;
   if (typeof data.query !== "string" || !data.query.trim()) throw new SymphonyError("linear_graphql_invalid_input", "linear_graphql query is required");
   if (data.variables !== undefined && (!data.variables || typeof data.variables !== "object" || Array.isArray(data.variables))) {
     throw new SymphonyError("linear_graphql_invalid_input", "linear_graphql variables must be an object");
   }
+  validateSingleOperation(data.query);
   return { query: data.query, variables: (data.variables as Record<string, unknown> | undefined) ?? {} };
 }

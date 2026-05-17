@@ -38,12 +38,12 @@ Run `takt validate ./WORKFLOW.md` or `takt doctor ./WORKFLOW.md` before starting
 - `src/workspace`: sanitized workspace paths, containment checks, lifecycle hooks.
 - `src/runtime`: first-class Docker worker runtime with host fallback for local tests/debugging.
 - `src/agent`: Codex app-server JSON-line client, hosted `takt_linear` MCP bridge, and agent runner.
-- `src/orchestrator`: polling, dispatch, reconciliation, retries, token/rate-limit accounting.
+- `src/orchestrator`: polling, dispatch explainability, reconciliation, retries, token/rate-limit accounting.
 - `src/persistence`: durable JSON state snapshots for retry/history recovery across process restarts.
 - `src/http`: optional dashboard and `/api/v1/*` status/control endpoints.
 - `examples/toy-webapp`: frontend/backend TypeScript fixture used to exercise Takt as a web-app production factory.
 
-See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and [docs/OPERATIONS.md](./docs/OPERATIONS.md) for operating details and safety posture.
+See [docs/TAKT_PRODUCT_CONTRACT.md](./docs/TAKT_PRODUCT_CONTRACT.md), [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), and [docs/OPERATIONS.md](./docs/OPERATIONS.md) for the concrete product contract, operating details, and safety posture.
 
 ## Implementation Notes
 
