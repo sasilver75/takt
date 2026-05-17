@@ -12,8 +12,8 @@ RUN corepack enable \
   && corepack prepare pnpm@9.15.9 --activate \
   && npm install -g @openai/codex@0.130.0
 
-COPY docker/symphony-capture-url /usr/local/bin/symphony-capture-url
-RUN chmod 0755 /usr/local/bin/symphony-capture-url
+COPY docker/takt-capture-url /usr/local/bin/takt-capture-url
+RUN chmod 0755 /usr/local/bin/takt-capture-url
 
 WORKDIR /workspace
 

@@ -20,7 +20,7 @@ describe("CLI", () => {
   });
 
   test("uses ./WORKFLOW.md from cwd when no workflow path is provided", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-cli-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-cli-"));
     await writeFile(path.join(dir, "WORKFLOW.md"), "---\ntracker:\n  project_slug: demo\n---\nbody\n");
     const startedOptions: SymphonyServiceOptions[] = [];
 
@@ -42,7 +42,7 @@ describe("CLI", () => {
   });
 
   test("reconcile-once starts service in reconcile mode and stops immediately", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-cli-reconcile-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-cli-reconcile-"));
     await writeFile(path.join(dir, "WORKFLOW.md"), "---\ntracker:\n  project_slug: demo\n---\nbody\n");
     const startedOptions: SymphonyServiceOptions[] = [];
     let stopped = false;
@@ -72,7 +72,7 @@ describe("CLI", () => {
   });
 
   test("returns nonzero and writes startup errors for missing workflow files", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-cli-missing-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-cli-missing-"));
     const stderr: string[] = [];
     const code = await runCli({
       argv: ["missing.md"],
@@ -85,12 +85,12 @@ describe("CLI", () => {
     });
 
     expect(code).toBe(1);
-    expect(stderr.join("")).toContain("symphony startup failed:");
+    expect(stderr.join("")).toContain("takt startup failed:");
     expect(stderr.join("")).toContain("missing.md");
   });
 
   test("surfaces service startup failure cleanly", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-cli-failure-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-cli-failure-"));
     await writeFile(path.join(dir, "WORKFLOW.md"), "body\n");
     const stderr: string[] = [];
     const code = await runCli({
@@ -109,7 +109,7 @@ describe("CLI", () => {
     });
 
     expect(code).toBe(1);
-    expect(stderr.join("")).toContain("symphony startup failed: config exploded");
+    expect(stderr.join("")).toContain("takt startup failed: config exploded");
   });
 });
 

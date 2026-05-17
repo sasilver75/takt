@@ -49,7 +49,7 @@ describe("GitHub PR tracker", () => {
           title: "SAM-7: Fix widget",
           state: "open",
           merged: false,
-          head: { ref: "symphony/sam-7-fix-widget", sha: "abc123def456" },
+          head: { ref: "takt/sam-7-fix-widget", sha: "abc123def456" },
           mergeable_state: "clean",
           draft: false
         });
@@ -98,7 +98,7 @@ describe("GitHub PR tracker", () => {
           },
           {
             user: { login: "symphony" },
-            body: "<!-- symphony:evidence -->\n## Symphony Worker Evidence",
+            body: "<!-- takt:evidence -->\n## Takt Worker Evidence",
             html_url: "https://github.test/pr-comment/evidence",
             created_at: "2026-05-15T12:02:30Z",
             updated_at: "2026-05-15T12:02:30Z"
@@ -107,12 +107,12 @@ describe("GitHub PR tracker", () => {
       }
       return jsonResponse({ message: "not found" }, 404);
     };
-    const tracker = new GitHubPullRequestTracker(() => config("/tmp/symphony-gh-tracker"), createLogger(() => undefined), fetchImpl);
+    const tracker = new GitHubPullRequestTracker(() => config("/tmp/takt-gh-tracker"), createLogger(() => undefined), fetchImpl);
 
     const inspection = await tracker.inspect({
       number: 7,
       url: "https://github.test/acme/widgets/pull/7",
-      branch: "symphony/sam-7-fix-widget",
+      branch: "takt/sam-7-fix-widget",
       title: "SAM-7: Fix widget",
       created: true
     });
@@ -147,7 +147,7 @@ describe("GitHub PR tracker", () => {
     expect(classifyReviews([])).toBe("review_required");
   });
 
-  test("discovers open and recently closed Symphony pull requests and infers Linear issue identifiers", async () => {
+  test("discovers open and recently closed Takt pull requests and infers Linear issue identifiers", async () => {
     const requests: string[] = [];
     const fetchImpl: typeof fetch = async (url) => {
       requests.push(String(url));
@@ -158,7 +158,7 @@ describe("GitHub PR tracker", () => {
             html_url: "https://github.test/acme/widgets/pull/8",
             title: "SAM-8: Recover after restart",
             body: "Linear: SAM-8",
-            head: { ref: "symphony/sam-8-recover-after-restart" }
+            head: { ref: "takt/sam-8-recover-after-restart" }
           },
           {
             number: 9,
@@ -173,23 +173,23 @@ describe("GitHub PR tracker", () => {
           {
             number: 10,
             html_url: "https://github.test/acme/widgets/pull/10",
-            title: "SAM-10: Human merged while Symphony was offline",
+            title: "SAM-10: Human merged while Takt was offline",
             body: "Linear: SAM-10",
             state: "closed",
             merged_at: "2026-05-16T12:00:00Z",
-            head: { ref: "symphony/sam-10-human-merged-while-symphony-was-offline" }
+            head: { ref: "takt/sam-10-human-merged-while-takt-was-offline" }
           }
         ]);
       }
       return jsonResponse({ message: "not found" }, 404);
     };
-    const tracker = new GitHubPullRequestTracker(() => config("/tmp/symphony-gh-discover"), createLogger(() => undefined), fetchImpl);
+    const tracker = new GitHubPullRequestTracker(() => config("/tmp/takt-gh-discover"), createLogger(() => undefined), fetchImpl);
 
     await expect(tracker.discoverManaged({ states: ["open", "closed"] })).resolves.toEqual([
       {
         number: 8,
         url: "https://github.test/acme/widgets/pull/8",
-        branch: "symphony/sam-8-recover-after-restart",
+        branch: "takt/sam-8-recover-after-restart",
         title: "SAM-8: Recover after restart",
         created: false,
         issue_identifier: "SAM-8"
@@ -197,8 +197,8 @@ describe("GitHub PR tracker", () => {
       {
         number: 10,
         url: "https://github.test/acme/widgets/pull/10",
-        branch: "symphony/sam-10-human-merged-while-symphony-was-offline",
-        title: "SAM-10: Human merged while Symphony was offline",
+        branch: "takt/sam-10-human-merged-while-takt-was-offline",
+        title: "SAM-10: Human merged while Takt was offline",
         created: false,
         issue_identifier: "SAM-10"
       }
@@ -206,7 +206,7 @@ describe("GitHub PR tracker", () => {
     expect(requests[0]).toContain("state=open");
     expect(requests[1]).toContain("state=closed");
     expect(requests[0]).toContain("base=main");
-    expect(inferIssueIdentifier({ title: "fallback" }, "symphony/abc-12-title", "symphony/")).toBe("ABC-12");
+    expect(inferIssueIdentifier({ title: "fallback" }, "takt/abc-12-title", "takt/")).toBe("ABC-12");
   });
 });
 
@@ -232,9 +232,9 @@ function config(root: string): SymphonyConfig {
       token: "github-secret-token",
       remote: "origin",
       base_branch: "main",
-      branch_prefix: "symphony",
-      pr_ready_file: "SYMPHONY_PR_READY.json",
-      evidence_file: "SYMPHONY_EVIDENCE.json",
+      branch_prefix: "takt",
+      pr_ready_file: "TAKT_PR_READY.json",
+      evidence_file: "TAKT_EVIDENCE.json",
       draft: false,
       merge: {
         enabled: false,
@@ -259,7 +259,7 @@ function config(root: string): SymphonyConfig {
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 0,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }

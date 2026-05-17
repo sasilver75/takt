@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 import type { SymphonyConfig } from "../domain.js";
 import { createLogger } from "../observability/logger.js";
-import { GitHubPullRequestEvidencePublisher, renderEvidenceComment, SYMPHONY_EVIDENCE_COMMENT_MARKER } from "./evidence.js";
+import { GitHubPullRequestEvidencePublisher, renderEvidenceComment, TAKT_EVIDENCE_COMMENT_MARKER } from "./evidence.js";
 import { MAX_LOCAL_EVIDENCE_DIRECTORY_FILES } from "./evidenceArtifacts.js";
 
 describe("GitHub PR evidence publisher", () => {
@@ -15,18 +15,18 @@ describe("GitHub PR evidence publisher", () => {
       if (String(init?.method ?? "GET") === "GET") return jsonResponse([]);
       return jsonResponse({ id: 123, html_url: "https://github.test/acme/widgets/pull/9#issuecomment-123" });
     };
-    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/takt-gh-evidence"), createLogger(() => undefined), fetchImpl);
 
     await expect(
       publisher.publish({
-        pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9", title: "SAM-9", created: true },
+        pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "takt/sam-9", title: "SAM-9", created: true },
         workspacePath: "/tmp/workspace",
         manifest: {
           summary: "Verified the app flow.",
           verification: ["pnpm test", "npx playwright test"],
           commands: [
             { kind: "server", status: "started", command: "pnpm dev -- --host 127.0.0.1", description: "Launched the app for browser capture." },
-            { kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-9/home.png" }
+            { kind: "capture", status: "succeeded", command: "takt-capture-url http://127.0.0.1:3000 artifacts/SAM-9/home.png" }
           ],
           app_urls: ["http://127.0.0.1:3000"],
           artifacts: [
@@ -45,16 +45,16 @@ describe("GitHub PR evidence publisher", () => {
     expect(requests.map((request) => request.method)).toEqual(["GET", "POST"]);
     expect(requests[1]?.url).toBe("https://api.github.test/repos/acme/widgets/issues/9/comments");
     expect(requests[1]?.body).toMatchObject({
-      body: expect.stringContaining(SYMPHONY_EVIDENCE_COMMENT_MARKER)
+      body: expect.stringContaining(TAKT_EVIDENCE_COMMENT_MARKER)
     });
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("artifacts/SAM-9/home.png");
-    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("https://github.test/acme/widgets/blob/symphony/sam-9/artifacts/SAM-9/home.png");
-    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("![screenshot: artifacts/SAM-9/home.png](https://github.test/acme/widgets/raw/symphony/sam-9/artifacts/SAM-9/home.png)");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("https://github.test/acme/widgets/blob/takt/sam-9/artifacts/SAM-9/home.png");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("![screenshot: artifacts/SAM-9/home.png](https://github.test/acme/widgets/raw/takt/sam-9/artifacts/SAM-9/home.png)");
     expect(String((requests[1]?.body as { body?: unknown }).body)).not.toContain("![trace:");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("npx playwright test");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("### Evidence Commands");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("server started: pnpm dev -- --host 127.0.0.1 - Launched the app for browser capture.");
-    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("capture succeeded: symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-9/home.png");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("capture succeeded: takt-capture-url http://127.0.0.1:3000 artifacts/SAM-9/home.png");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("### Artifact Warnings");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("was not found in the worker workspace");
   });
@@ -64,14 +64,14 @@ describe("GitHub PR evidence publisher", () => {
     const fetchImpl: typeof fetch = async (url, init) => {
       requests.push({ method: String(init?.method ?? "GET"), url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
       if (String(init?.method ?? "GET") === "GET") {
-        return jsonResponse([{ id: 456, body: `${SYMPHONY_EVIDENCE_COMMENT_MARKER}\nold`, html_url: "https://github.test/comment/456" }]);
+        return jsonResponse([{ id: 456, body: `${TAKT_EVIDENCE_COMMENT_MARKER}\nold`, html_url: "https://github.test/comment/456" }]);
       }
       return jsonResponse({ id: 456, html_url: "https://github.test/comment/456" });
     };
-    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/takt-gh-evidence"), createLogger(() => undefined), fetchImpl);
 
     await expect(publisher.publish({
-      pullRequest: { number: 10, url: "https://github.test/acme/widgets/pull/10", branch: "symphony/sam-10", title: "SAM-10", created: false },
+      pullRequest: { number: 10, url: "https://github.test/acme/widgets/pull/10", branch: "takt/sam-10", title: "SAM-10", created: false },
       workspacePath: "/tmp/workspace",
       manifest: { summary: "Updated evidence." }
     })).resolves.toMatchObject({ warnings: [] });
@@ -81,7 +81,7 @@ describe("GitHub PR evidence publisher", () => {
   });
 
   test("uploads local artifact files under artifacts to the PR branch before commenting", async () => {
-    const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-evidence-upload-"));
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "takt-gh-evidence-upload-"));
     await mkdir(path.join(workspace, "artifacts", "SAM-9"), { recursive: true });
     await writeFile(path.join(workspace, "artifacts", "SAM-9", "report.txt"), "review evidence\n");
     const requests: Array<{ method: string; url: string; body: unknown }> = [];
@@ -94,10 +94,10 @@ describe("GitHub PR evidence publisher", () => {
       if (String(init?.method ?? "GET") === "PUT") return jsonResponse({ content: { path: "artifacts/SAM-9/report.txt" } });
       return jsonResponse({ id: 321, html_url: "https://github.test/acme/widgets/pull/9#issuecomment-321" });
     };
-    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/takt-gh-evidence"), createLogger(() => undefined), fetchImpl);
 
     await expect(publisher.publish({
-      pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9", title: "SAM-9", created: true },
+      pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "takt/sam-9", title: "SAM-9", created: true },
       workspacePath: workspace,
       manifest: {
         summary: "Verified with a local report.",
@@ -108,18 +108,18 @@ describe("GitHub PR evidence publisher", () => {
     const put = requests.find((request) => request.method === "PUT");
     expect(put?.url).toBe("https://api.github.test/repos/acme/widgets/contents/artifacts/SAM-9/report.txt");
     expect(put?.body).toMatchObject({
-      branch: "symphony/sam-9",
+      branch: "takt/sam-9",
       content: Buffer.from("review evidence\n").toString("base64"),
-      message: "Add Symphony evidence artifact artifacts/SAM-9/report.txt"
+      message: "Add Takt evidence artifact artifacts/SAM-9/report.txt"
     });
     const comment = requests.find((request) => request.method === "POST");
     const body = String((comment?.body as { body?: unknown } | undefined)?.body ?? "");
-    expect(body).toContain("https://github.test/acme/widgets/blob/symphony/sam-9/artifacts/SAM-9/report.txt");
+    expect(body).toContain("https://github.test/acme/widgets/blob/takt/sam-9/artifacts/SAM-9/report.txt");
     expect(body).not.toContain("Artifact Warnings");
   });
 
   test("warns when local artifact directories exceed the upload file cap", async () => {
-    const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-evidence-upload-cap-"));
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "takt-gh-evidence-upload-cap-"));
     await mkdir(path.join(workspace, "artifacts", "SAM-9", "screens"), { recursive: true });
     for (let index = 0; index < MAX_LOCAL_EVIDENCE_DIRECTORY_FILES + 1; index += 1) {
       await writeFile(path.join(workspace, "artifacts", "SAM-9", "screens", `${String(index).padStart(3, "0")}.txt`), `file ${index}\n`);
@@ -134,11 +134,11 @@ describe("GitHub PR evidence publisher", () => {
       if (String(init?.method ?? "GET") === "PUT") return jsonResponse({ content: { path: "artifact" } });
       return jsonResponse({ id: 654, html_url: "https://github.test/acme/widgets/pull/9#issuecomment-654" });
     };
-    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/takt-gh-evidence"), createLogger(() => undefined), fetchImpl);
 
     await expect(
       publisher.publish({
-        pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9", title: "SAM-9", created: true },
+        pullRequest: { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "takt/sam-9", title: "SAM-9", created: true },
         workspacePath: workspace,
         manifest: {
           summary: "Verified with many local artifacts.",
@@ -163,11 +163,11 @@ describe("GitHub PR evidence publisher", () => {
       if (String(init?.method ?? "GET") === "GET") return jsonResponse([]);
       return jsonResponse({ id: 789, html_url: "https://github.test/comment/789" });
     };
-    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/symphony-gh-evidence"), createLogger(() => undefined), fetchImpl);
+    const publisher = new GitHubPullRequestEvidencePublisher(() => config("/tmp/takt-gh-evidence"), createLogger(() => undefined), fetchImpl);
 
     await expect(
       publisher.publish({
-        pullRequest: { number: 11, url: "https://github.test/acme/widgets/pull/11", branch: "symphony/sam-11", title: "SAM-11", created: false },
+        pullRequest: { number: 11, url: "https://github.test/acme/widgets/pull/11", branch: "takt/sam-11", title: "SAM-11", created: false },
         workspacePath: "/tmp/workspace",
         manifest: { summary: "Fresh evidence." },
         previousCommentId: 456
@@ -180,7 +180,7 @@ describe("GitHub PR evidence publisher", () => {
 
   test("renders evidence comments deterministically", () => {
     const body = renderEvidenceComment(
-      { number: 1, url: "https://github.test/acme/widgets/pull/1", branch: "symphony/sam-1", title: "SAM-1", created: true },
+      { number: 1, url: "https://github.test/acme/widgets/pull/1", branch: "takt/sam-1", title: "SAM-1", created: true },
       {
         summary: "Done",
         artifacts: [
@@ -190,14 +190,14 @@ describe("GitHub PR evidence publisher", () => {
       },
       "/tmp/workspace"
     );
-    expect(body).toContain(SYMPHONY_EVIDENCE_COMMENT_MARKER);
+    expect(body).toContain(TAKT_EVIDENCE_COMMENT_MARKER);
     expect(body).toContain("`artifacts/SAM-1/report.txt`");
     expect(body).not.toContain("outside");
   });
 
   test("renders artifact validation warnings when evidence paths are weak", () => {
     const body = renderEvidenceComment(
-      { number: 2, url: "https://github.test/acme/widgets/pull/2", branch: "symphony/sam-2", title: "SAM-2", created: true },
+      { number: 2, url: "https://github.test/acme/widgets/pull/2", branch: "takt/sam-2", title: "SAM-2", created: true },
       { summary: "Done", artifacts: [{ path: "artifacts/SAM-2/missing.png", kind: "screenshot" }] },
       "/tmp/workspace",
       { owner: "acme", repo: "widgets" },
@@ -230,9 +230,9 @@ function config(root: string): SymphonyConfig {
       token: "github-secret-token",
       remote: "origin",
       base_branch: "main",
-      branch_prefix: "symphony",
-      pr_ready_file: "SYMPHONY_PR_READY.json",
-      evidence_file: "SYMPHONY_EVIDENCE.json",
+      branch_prefix: "takt",
+      pr_ready_file: "TAKT_PR_READY.json",
+      evidence_file: "TAKT_EVIDENCE.json",
       draft: false,
       merge: {
         enabled: false,
@@ -257,7 +257,7 @@ function config(root: string): SymphonyConfig {
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 0,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }

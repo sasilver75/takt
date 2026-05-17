@@ -1,6 +1,6 @@
-# Symphony TypeScript Orchestrator
+# Takt
 
-This repository implements the Symphony specification in [SPEC.md](./SPEC.md): a long-running service that polls Linear, creates one workspace per issue, and runs Codex app-server sessions inside those workspaces.
+Takt is a TypeScript software factory runtime built from the Symphony specification in [SPEC.md](./SPEC.md). It polls Linear, creates one isolated workspace per issue, runs Codex app-server sessions inside those workspaces, and turns completed worker output into reviewable GitHub PRs.
 
 ## Quick Start
 
@@ -12,7 +12,7 @@ pnpm test:factory
 pnpm build
 pnpm verify
 pnpm integration:live
-docker build -f docker/codex-worker.Dockerfile -t symphony-codex-worker:latest .
+docker build -f docker/codex-worker.Dockerfile -t takt-codex-worker:latest .
 pnpm dev ./examples/WORKFLOW.md --reconcile-once
 pnpm dev ./examples/WORKFLOW.md --port 0
 ```
@@ -27,11 +27,11 @@ Production workflows should keep secrets in environment variables and refer to t
 - `src/github`: orchestrator-owned branch push, GitHub PR creation/update, lifecycle inspection, evidence comments, and optional policy-gated merging.
 - `src/workspace`: sanitized workspace paths, containment checks, lifecycle hooks.
 - `src/runtime`: first-class Docker worker runtime with host fallback for local tests/debugging.
-- `src/agent`: Codex app-server JSON-line client, hosted `symphony_linear` MCP bridge, and agent runner.
+- `src/agent`: Codex app-server JSON-line client, hosted `takt_linear` MCP bridge, and agent runner.
 - `src/orchestrator`: polling, dispatch, reconciliation, retries, token/rate-limit accounting.
 - `src/persistence`: durable JSON state snapshots for retry/history recovery across process restarts.
 - `src/http`: optional dashboard and `/api/v1/*` status/control endpoints.
-- `examples/toy-webapp`: frontend/backend TypeScript fixture used to exercise Symphony as a web-app production factory.
+- `examples/toy-webapp`: frontend/backend TypeScript fixture used to exercise Takt as a web-app production factory.
 
 See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and [docs/OPERATIONS.md](./docs/OPERATIONS.md) for operating details and safety posture.
 
@@ -39,11 +39,11 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and [docs/OPERATIONS.md](./do
 
 The generated Codex protocol schemas and TypeScript bindings live under `schema/codex-app-server` and `src/codex/generated`. They are treated as local protocol reference artifacts. The runtime client uses the current app-server JSON-RPC line framing and sends `initialize`, `thread/start`, and `turn/start` requests with runtime-scoped `cwd`.
 
-The implementation follows the agent-first harness guidance in OpenAI’s [harness engineering article](https://openai.com/index/harness-engineering/) and [Symphony announcement](https://openai.com/index/open-source-codex-orchestration-symphony/): repository-local knowledge is the system of record, observability is exposed to agents/operators, and the workflow prompt remains versioned with the target repo. Worker sessions run Codex app-server inside a per-issue Docker container by default, with the workspace mounted at `/workspace`, an ephemeral minimal Codex home containing auth material, and no repo root or `keys.txt` mount. They get a Symphony-owned `linear_graphql` MCP tool backed by a short-lived authenticated Streamable HTTP MCP server, so Linear reads are portable and auditable rather than dependent on globally installed Codex plugins or worker-visible Linear credentials. Tracker and GitHub secrets are scrubbed from the Codex app-server environment and redacted from Symphony logs.
+The implementation follows the agent-first harness guidance in OpenAI’s [harness engineering article](https://openai.com/index/harness-engineering/) and [Symphony announcement](https://openai.com/index/open-source-codex-orchestration-symphony/): repository-local knowledge is the system of record, observability is exposed to agents/operators, and the workflow prompt remains versioned with the target repo. Worker sessions run Codex app-server inside a per-issue Docker container by default, with the workspace mounted at `/workspace`, an ephemeral minimal Codex home containing auth material, and no repo root or `keys.txt` mount. They get a Takt-owned `linear_graphql` MCP tool backed by a short-lived authenticated Streamable HTTP MCP server, so Linear reads are portable and auditable rather than dependent on globally installed Codex plugins or worker-visible Linear credentials. Tracker and GitHub secrets are scrubbed from the Codex app-server environment and redacted from Takt logs.
 
-When `github.enabled` is configured, workers commit their code and signal PR readiness with `SYMPHONY_PR_READY.json`; Symphony then pushes the issue branch, creates or updates the GitHub PR, comments the PR link in Linear, and moves the issue to the configured review state. Workers may also write `SYMPHONY_EVIDENCE.json` with app URLs, verification commands, screenshots, traces, logs, or other artifact paths; Symphony publishes that as a sticky PR comment. The orchestrator keeps inspecting the PR after publication: managed open PRs are rediscovered after restart, a bounded closed/merged PR scan catches human merges that happened while Symphony was offline, passing or pending checks remain in human review, merged/closed PRs are recorded as terminal, and failing checks, top-level PR comments, review comments, or unresolved review threads requeue the issue with a focused follow-up prompt. If `github.merge.enabled` is explicitly turned on, Symphony can merge non-draft PRs whose inspected head SHA satisfies the configured approval/check/mergeability policy and then move the issue to `github.merge.complete_state`; the same completion-state transition is also applied when Symphony observes a human-merged managed PR. GitHub credentials stay in the orchestrator process and are not mounted into worker containers.
+When `github.enabled` is configured, workers commit their code and signal PR readiness with `TAKT_PR_READY.json`; Takt then pushes the issue branch, creates or updates the GitHub PR, comments the PR link in Linear, and moves the issue to the configured review state. Workers may also write `TAKT_EVIDENCE.json` with app URLs, verification commands, screenshots, traces, logs, or other artifact paths; Takt publishes that as a sticky PR comment. The orchestrator keeps inspecting the PR after publication: managed open PRs are rediscovered after restart, a bounded closed/merged PR scan catches human merges that happened while Takt was offline, passing or pending checks remain in human review, merged/closed PRs are recorded as terminal, and failing checks, top-level PR comments, review comments, or unresolved review threads requeue the issue with a focused follow-up prompt. If `github.merge.enabled` is explicitly turned on, Takt can merge non-draft PRs whose inspected head SHA satisfies the configured approval/check/mergeability policy and then move the issue to `github.merge.complete_state`; the same completion-state transition is also applied when Takt observes a human-merged managed PR. GitHub credentials stay in the orchestrator process and are not mounted into worker containers.
 
-Restart-meaningful orchestration state is persisted under `workspace.root/.symphony/state.json`: retry entries, completed issue IDs, issue history, recent events, token totals, and PR metadata. Live worker processes are not resumed after restart; Symphony restores metadata and reconciles Linear/GitHub before dispatching fresh attempts.
+Restart-meaningful orchestration state is persisted under `workspace.root/.takt/state.json`: retry entries, completed issue IDs, issue history, recent events, token totals, and PR metadata. Live worker processes are not resumed after restart; Takt restores metadata and reconciles Linear/GitHub before dispatching fresh attempts.
 
 ## Factory Harness
 
@@ -54,9 +54,9 @@ Restart-meaningful orchestration state is persisted under `workspace.root/.symph
 3. Handles approval and `linear_graphql` tool requests.
 4. Modifies both backend and frontend TypeScript.
 5. Verifies the changed app with `tsc` from outside the repo tree.
-6. Confirms Symphony status snapshots show handoff/completion state.
+6. Confirms Takt status snapshots show handoff/completion state.
 
 `pnpm integration:live` is the explicit real-integration profile. It reports `SKIP` unless
-`SYMPHONY_LIVE_INTEGRATION=1` is set. When enabled, it performs non-mutating live checks: workflow
+`TAKT_LIVE_INTEGRATION=1` is set. When enabled, it performs non-mutating live checks: workflow
 load, dispatch config validation, Linear candidate read, and GitHub repository metadata read when
 `github.enabled` is true.

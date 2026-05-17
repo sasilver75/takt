@@ -176,7 +176,7 @@ function isAllowedDirtyPath(statusPath: string, allowedDirtyPaths: string[]): bo
 }
 
 async function createAskpass(token: string): Promise<string> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-git-askpass-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "takt-git-askpass-"));
   const script = path.join(dir, "askpass.sh");
   await writeFile(
     script,

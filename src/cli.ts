@@ -35,7 +35,7 @@ export async function startCli(options: StartCliOptions = {}): Promise<CliServic
   const service = options.serviceFactory?.(serviceOptions) ?? new SymphonyService(serviceOptions);
   const started = await service.start();
   if (started.http) {
-    logger.info("symphony dashboard available", { url: `http://${started.http.host}:${started.http.port}/` });
+    logger.info("takt dashboard available", { url: `http://${started.http.host}:${started.http.port}/` });
   }
   if (args.reconcileOnce) {
     await service.stop();
@@ -56,7 +56,7 @@ export async function runCli(options: StartCliOptions = {}): Promise<number> {
     await startCli(options);
     return 0;
   } catch (error) {
-    (options.stderr ?? process.stderr).write(`symphony startup failed: ${errorMessage(error)}\n`);
+    (options.stderr ?? process.stderr).write(`takt startup failed: ${errorMessage(error)}\n`);
     return 1;
   }
 }

@@ -9,7 +9,7 @@ import { createWorkerRuntime } from "./workerRuntime.js";
 
 describe("worker runtime", () => {
   test("docker runtime exposes container workspace, authenticated MCP routing, and scoped env", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-runtime-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-runtime-"));
     const workspace = await workspaceAt(root, "SAM-71");
     const runtime = createWorkerRuntime(config(root, fakeDockerImage(), null), workspace, issue({ identifier: "SAM-71" }), createLogger(() => undefined));
 
@@ -20,17 +20,17 @@ describe("worker runtime", () => {
     expect(runtime.bridgePublicHost).toBe("host.docker.internal");
     expect(runtime.bridgeBearerToken).toMatch(/^[A-Za-z0-9_-]{20,}$/);
     expect(runtime.env).toMatchObject({
-      SYMPHONY_ISSUE_IDENTIFIER: "SAM-71",
-      SYMPHONY_RUNTIME_WORKSPACE: "/workspace",
-      PORT: runtime.env.SYMPHONY_PORT_BASE,
+      TAKT_ISSUE_IDENTIFIER: "SAM-71",
+      TAKT_RUNTIME_WORKSPACE: "/workspace",
+      PORT: runtime.env.TAKT_PORT_BASE,
       HOME: "/root",
       CODEX_HOME: "/root/.codex",
-      COMPOSE_PROJECT_NAME: "symphony_sam-71"
+      COMPOSE_PROJECT_NAME: "takt_sam-71"
     });
   });
 
   test("docker app-server launch keeps bearer token out of argv and passes it only by env name", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-runtime-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-runtime-"));
     const fakeBin = path.join(root, "bin");
     const logPath = path.join(root, "docker.log");
     const codexHome = path.join(root, "host-codex-home");
@@ -44,7 +44,7 @@ describe("worker runtime", () => {
 
     const child = runtime.spawnAppServer("codex app-server", {
       PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
-      SYMPHONY_LINEAR_MCP_TOKEN: "secret-bridge-token"
+      TAKT_LINEAR_MCP_TOKEN: "secret-bridge-token"
     });
     await new Promise<void>((resolve, reject) => {
       child.on("exit", () => resolve());
@@ -53,7 +53,7 @@ describe("worker runtime", () => {
 
     const entry = JSON.parse(await readFile(logPath, "utf8")) as { argv: string[]; env: Record<string, string | undefined> };
     expect(entry.argv).toContain("--env");
-    expect(entry.argv).toContain("SYMPHONY_LINEAR_MCP_TOKEN");
+    expect(entry.argv).toContain("TAKT_LINEAR_MCP_TOKEN");
     expect(entry.argv.join("\n")).not.toContain("secret-bridge-token");
     expect(entry.argv.join("\n")).not.toContain(`source=${codexHome},target=/root/.codex`);
     expect(entry.argv.join("\n")).toContain("type=bind,source=");
@@ -69,7 +69,7 @@ describe("worker runtime", () => {
     });
     expect(entry.argv).toContain("host.docker.internal:host-gateway");
     expect(entry.argv).toContain(fakeDockerImage());
-    expect(entry.env.SYMPHONY_LINEAR_MCP_TOKEN).toBe("secret-bridge-token");
+    expect(entry.env.TAKT_LINEAR_MCP_TOKEN).toBe("secret-bridge-token");
     await runtime.cleanup();
   });
 });
@@ -81,7 +81,7 @@ async function workspaceAt(root: string, key: string): Promise<Workspace> {
 }
 
 function fakeDockerImage(): string {
-  return "symphony-codex-worker:test";
+  return "takt-codex-worker:test";
 }
 
 async function writeFakeDocker(binDir: string, logPath: string): Promise<void> {
@@ -92,7 +92,7 @@ async function writeFakeDocker(binDir: string, logPath: string): Promise<void> {
     [
       "#!/usr/bin/env node",
       "const fs = require('fs');",
-      `fs.writeFileSync(${JSON.stringify(logPath)}, JSON.stringify({ argv: process.argv.slice(2), env: { SYMPHONY_LINEAR_MCP_TOKEN: process.env.SYMPHONY_LINEAR_MCP_TOKEN } }));`,
+      `fs.writeFileSync(${JSON.stringify(logPath)}, JSON.stringify({ argv: process.argv.slice(2), env: { TAKT_LINEAR_MCP_TOKEN: process.env.TAKT_LINEAR_MCP_TOKEN } }));`,
       "process.exit(0);",
       ""
     ].join("\n")
@@ -144,7 +144,7 @@ function config(root: string, image: string, codexHome: string | null): Symphony
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 1000,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
@@ -160,9 +160,9 @@ function githubDisabled(): SymphonyConfig["github"] {
     token: null,
     remote: "origin",
     base_branch: "main",
-    branch_prefix: "symphony",
-    pr_ready_file: "SYMPHONY_PR_READY.json",
-    evidence_file: "SYMPHONY_EVIDENCE.json",
+    branch_prefix: "takt",
+    pr_ready_file: "TAKT_PR_READY.json",
+    evidence_file: "TAKT_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };

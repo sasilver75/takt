@@ -30,7 +30,7 @@ function config(): SymphonyConfig {
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 1000,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
@@ -46,9 +46,9 @@ function githubDisabled(): SymphonyConfig["github"] {
     token: null,
     remote: "origin",
     base_branch: "main",
-    branch_prefix: "symphony",
-    pr_ready_file: "SYMPHONY_PR_READY.json",
-    evidence_file: "SYMPHONY_EVIDENCE.json",
+    branch_prefix: "takt",
+    pr_ready_file: "TAKT_PR_READY.json",
+    evidence_file: "TAKT_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };

@@ -8,7 +8,7 @@ import { createHttpStatusServer } from "./server.js";
 
 describe("HTTP status server", () => {
   test("serves dashboard, state, issue details, refresh, and method errors", async () => {
-    const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-http-artifacts-"));
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "takt-http-artifacts-"));
     await mkdir(path.join(workspace, "artifacts", "ABC-1"), { recursive: true });
     await writeFile(path.join(workspace, "artifacts", "ABC-1", "home.png"), "fake image", "utf8");
     await mkdir(path.join(workspace, "artifacts", "ABC-1", "many"), { recursive: true });
@@ -72,7 +72,7 @@ describe("HTTP status server", () => {
               last_error: null,
               recent_events: [{ at: "2026-01-01T00:00:01.000Z", event: "turn/started", session_id: "session-1", message: "Worker started" }],
               tracked: {
-                github_pull_request: { number: 7, url: "https://github.test/acme/widgets/pull/7", branch: "symphony/abc-1", title: "ABC-1: demo" },
+                github_pull_request: { number: 7, url: "https://github.test/acme/widgets/pull/7", branch: "takt/abc-1", title: "ABC-1: demo" },
                 github_pull_request_status: {
                   state: "open",
                   checks_status: "success",
@@ -116,7 +116,7 @@ describe("HTTP status server", () => {
     }
     const base = `http://${address.host}:${address.port}`;
     const dashboard = await (await fetch(`${base}/`)).text();
-    expect(dashboard).toContain("Symphony Status");
+    expect(dashboard).toContain("Takt Status");
     expect(dashboard).toContain("Recent Events");
     expect(dashboard).toContain("/issues/ABC-1");
     expect(dashboard).toContain("evidence (1 artifact, 1 app URL, 1 check, 1 command, 1 warning)");

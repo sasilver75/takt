@@ -4,11 +4,11 @@ import { describe, expect, test } from "vitest";
 describe("Docker worker image definition", () => {
   test("includes baseline browser evidence tooling", async () => {
     const dockerfile = await readFile("docker/codex-worker.Dockerfile", "utf8");
-    const captureHelper = await readFile("docker/symphony-capture-url", "utf8");
+    const captureHelper = await readFile("docker/takt-capture-url", "utf8");
 
     expect(dockerfile).toContain("chromium");
     expect(dockerfile).toContain("CHROME_BIN=/usr/bin/chromium");
-    expect(dockerfile).toContain("COPY docker/symphony-capture-url");
+    expect(dockerfile).toContain("COPY docker/takt-capture-url");
     expect(captureHelper).toContain("chromium");
     expect(captureHelper).toContain("--screenshot=");
     expect(captureHelper).toContain("--headless=new");

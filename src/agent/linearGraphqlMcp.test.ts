@@ -7,17 +7,17 @@ import { appendMcpConfig, prepareLinearGraphqlMcp, sanitizedCodexEnv } from "./l
 
 describe("linear GraphQL MCP launch config", () => {
   test("appends a hosted Codex MCP server URL without embedding capabilities", () => {
-    const command = appendMcpConfig("codex app-server", "symphony_linear", "http://127.0.0.1:1234/mcp", "SYMPHONY_LINEAR_MCP_TOKEN");
-    expect(command).toContain("mcp_servers.symphony_linear.url");
-    expect(command).toContain("mcp_servers.symphony_linear.bearer_token_env_var");
+    const command = appendMcpConfig("codex app-server", "takt_linear", "http://127.0.0.1:1234/mcp", "TAKT_LINEAR_MCP_TOKEN");
+    expect(command).toContain("mcp_servers.takt_linear.url");
+    expect(command).toContain("mcp_servers.takt_linear.bearer_token_env_var");
     expect(command).toContain("http://127.0.0.1:1234/mcp");
-    expect(command).not.toContain("mcp_servers.symphony_linear.args");
+    expect(command).not.toContain("mcp_servers.takt_linear.args");
     expect(command).not.toContain("LINEAR_API_KEY");
     expect(command).not.toContain("test-capability-token");
   });
 
   test("prepares hosted MCP config without writing token-bearing workspace files", async () => {
-    const workspace = await mkdtemp(path.join(os.tmpdir(), "symphony-mcp-"));
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "takt-mcp-"));
     const launch = await prepareLinearGraphqlMcp(
       config(),
       workspace,
@@ -25,10 +25,10 @@ describe("linear GraphQL MCP launch config", () => {
       { url: "http://127.0.0.1:1234/mcp", token: "test-capability-token" }
     );
 
-    expect(launch.command).toContain("mcp_servers.symphony_linear.url");
-    expect(launch.command).toContain("mcp_servers.symphony_linear.bearer_token_env_var");
+    expect(launch.command).toContain("mcp_servers.takt_linear.url");
+    expect(launch.command).toContain("mcp_servers.takt_linear.bearer_token_env_var");
     expect(launch.command).not.toContain("test-capability-token");
-    expect(launch.env.SYMPHONY_LINEAR_MCP_TOKEN).toBe("test-capability-token");
+    expect(launch.env.TAKT_LINEAR_MCP_TOKEN).toBe("test-capability-token");
     expect(launch.configuredUrl).toBe("http://127.0.0.1:1234/mcp");
     expect(await readdir(workspace)).toEqual([]);
     expect(launch.env.LINEAR_API_KEY).toBeUndefined();
@@ -46,10 +46,10 @@ describe("linear GraphQL MCP launch config", () => {
         GITHUB_WRAPPED: "before-ghp_configured_secret-after"
       },
       { ...config(), github: { ...githubDisabled(), enabled: true, token: "ghp_configured_secret" } },
-      { SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1" }
+      { TAKT_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1" }
     );
 
-    expect(env).toMatchObject({ PATH: "/usr/bin", NORMAL_FLAG: "1", SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1" });
+    expect(env).toMatchObject({ PATH: "/usr/bin", NORMAL_FLAG: "1", TAKT_LINEAR_CURRENT_ISSUE_IDENTIFIER: "SAM-1" });
     expect(env.LINEAR_API_KEY).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
     expect(env.WRAPPED).toBeUndefined();
@@ -96,7 +96,7 @@ function config(): SymphonyConfig {
       turn_timeout_ms: 60_000,
       read_timeout_ms: 1_000,
       stall_timeout_ms: 1_000,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
@@ -112,9 +112,9 @@ function githubDisabled(): SymphonyConfig["github"] {
     token: null,
     remote: "origin",
     base_branch: "main",
-    branch_prefix: "symphony",
-    pr_ready_file: "SYMPHONY_PR_READY.json",
-    evidence_file: "SYMPHONY_EVIDENCE.json",
+    branch_prefix: "takt",
+    pr_ready_file: "TAKT_PR_READY.json",
+    evidence_file: "TAKT_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };

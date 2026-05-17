@@ -1,10 +1,10 @@
 {
-  "name": "gallatin-demo",
+  "name": "takt",
   "version": "0.1.0",
-  "description": "Symphony TypeScript orchestration service for Codex agents.",
+  "description": "Takt TypeScript software factory runtime for Codex-powered implementation workers.",
   "type": "module",
   "bin": {
-    "symphony": "./dist/cli.js"
+    "takt": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -24,7 +24,8 @@
     "codex",
     "linear",
     "orchestration",
-    "symphony"
+    "software-factory",
+    "takt"
   ],
   "license": "MIT",
   "engines": {

@@ -51,9 +51,9 @@ export function resolveConfig(
       token: resolveOptionalSecret(stringAt(github, "token"), env),
       remote: stringAt(github, "remote") ?? "origin",
       base_branch: stringAt(github, "base_branch") ?? "main",
-      branch_prefix: stringAt(github, "branch_prefix") ?? "symphony",
-      pr_ready_file: stringAt(github, "pr_ready_file") ?? "SYMPHONY_PR_READY.json",
-      evidence_file: stringAt(github, "evidence_file") ?? "SYMPHONY_EVIDENCE.json",
+      branch_prefix: stringAt(github, "branch_prefix") ?? "takt",
+      pr_ready_file: stringAt(github, "pr_ready_file") ?? "TAKT_PR_READY.json",
+      evidence_file: stringAt(github, "evidence_file") ?? "TAKT_EVIDENCE.json",
       draft: booleanAt(github, "draft", false),
       merge: {
         enabled: booleanAt(githubMerge, "enabled", false),
@@ -69,7 +69,7 @@ export function resolveConfig(
       interval_ms: positiveIntegerAt(polling, "interval_ms", 30000)
     },
     workspace: {
-      root: resolvePath(stringAt(workspace, "root") ?? path.join(os.tmpdir(), "symphony_workspaces"), workflowDir, env)
+      root: resolvePath(stringAt(workspace, "root") ?? path.join(os.tmpdir(), "takt_workspaces"), workflowDir, env)
     },
     runtime: runtimeConfigAt(runtime, dockerRuntime, workflowDir, env),
     hooks: {
@@ -95,7 +95,7 @@ export function resolveConfig(
       stall_timeout_ms: integerAt(codex, "stall_timeout_ms", 300000),
       linear_graphql_mcp: {
         enabled: booleanAt(linearGraphqlMcp, "enabled", true),
-        server_name: mcpServerNameAt(linearGraphqlMcp, "server_name", "symphony_linear")
+        server_name: mcpServerNameAt(linearGraphqlMcp, "server_name", "takt_linear")
       }
     },
     observability: {
@@ -240,7 +240,7 @@ function runtimeConfigAt(
   return {
     kind: "docker",
     docker: {
-      image: stringAt(docker, "image") ?? "symphony-codex-worker:latest",
+      image: stringAt(docker, "image") ?? "takt-codex-worker:latest",
       workspace_mount: absoluteContainerPathAt(docker, "workspace_mount", "/workspace"),
       codex_home: optionalResolvedPathAt(docker, "codex_home", path.join(os.homedir(), ".codex"), workflowDir, env),
       codex_home_mount: absoluteContainerPathAt(docker, "codex_home_mount", "/root/.codex"),

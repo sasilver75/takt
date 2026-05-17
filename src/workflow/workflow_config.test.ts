@@ -17,7 +17,7 @@ describe("workflow loader and config", () => {
   });
 
   test("parses YAML front matter and prompt body", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-workflow-"));
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(
       workflowPath,
@@ -30,18 +30,18 @@ describe("workflow loader and config", () => {
 
   test("returns typed loader errors", async () => {
     await expect(loadWorkflow("/missing/WORKFLOW.md")).rejects.toMatchObject({ code: "missing_workflow_file" });
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-workflow-"));
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(workflowPath, "---\n- nope\n---\nbody");
     await expect(loadWorkflow(workflowPath)).rejects.toMatchObject({ code: "workflow_front_matter_not_a_map" });
   });
 
   test("applies defaults, env indirection, path expansion, and normalized per-state concurrency", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-workflow-"));
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(
       workflowPath,
-      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\n  claim_state: In Progress\n  review_state: Needs Human\ngithub:\n  enabled: true\n  owner: acme\n  repo: widgets\n  token: $GITHUB_TOKEN\n  merge:\n    enabled: true\n    method: rebase\n    delete_branch: false\n    complete_state: Done\nworkspace:\n  root: workspaces\nruntime:\n  kind: docker\n  docker:\n    image: symphony-codex-worker:test\n    codex_home: $CODEX_HOME_TEST\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\nobservability:\n  recent_event_limit: 123\n  issue_event_limit: 17\n  run_attempt_limit: 9\n---\nbody`
+      `---\ntracker:\n  kind: linear\n  api_key: $LINEAR_TOKEN\n  project_slug: demo\n  claim_state: In Progress\n  review_state: Needs Human\ngithub:\n  enabled: true\n  owner: acme\n  repo: widgets\n  token: $GITHUB_TOKEN\n  merge:\n    enabled: true\n    method: rebase\n    delete_branch: false\n    complete_state: Done\nworkspace:\n  root: workspaces\nruntime:\n  kind: docker\n  docker:\n    image: takt-codex-worker:test\n    codex_home: $CODEX_HOME_TEST\nagent:\n  max_concurrent_agents_by_state:\n    Todo: 2\n    bad: 0\ncodex:\n  command: codex app-server --flag\nobservability:\n  recent_event_limit: 123\n  issue_event_limit: 17\n  run_attempt_limit: 9\n---\nbody`
     );
     const config = resolveConfig(await loadWorkflow(workflowPath), {
       LINEAR_TOKEN: "secret",
@@ -52,7 +52,7 @@ describe("workflow loader and config", () => {
     expect(config.tracker.api_key).toBe("secret");
     expect(config.tracker.claim_state).toBe("In Progress");
     expect(config.tracker.review_state).toBe("Needs Human");
-    expect(config.github).toMatchObject({ enabled: true, owner: "acme", repo: "widgets", token: "github-secret", evidence_file: "SYMPHONY_EVIDENCE.json" });
+    expect(config.github).toMatchObject({ enabled: true, owner: "acme", repo: "widgets", token: "github-secret", evidence_file: "TAKT_EVIDENCE.json" });
     expect(config.github.merge).toMatchObject({
       enabled: true,
       method: "rebase",
@@ -69,7 +69,7 @@ describe("workflow loader and config", () => {
     expect(config.runtime).toMatchObject({
       kind: "docker",
       docker: {
-        image: "symphony-codex-worker:test",
+        image: "takt-codex-worker:test",
         workspace_mount: "/workspace",
         codex_home: path.join(dir, ".codex"),
         mcp_host: "host.docker.internal"
@@ -94,7 +94,7 @@ describe("workflow loader and config", () => {
   });
 
   test("runtime reload keeps last good config after invalid change", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-runtime-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-runtime-"));
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(workflowPath, "---\ntracker:\n  kind: linear\n  api_key: $TOKEN\n  project_slug: demo\npolling:\n  interval_ms: 25\n---\nbody");
     const logs: string[] = [];
@@ -113,7 +113,7 @@ describe("workflow loader and config", () => {
   });
 
   test("dispatch validation rejects missing credentials without printing secrets", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-workflow-"));
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(workflowPath, "---\ntracker:\n  kind: linear\n  api_key: $MISSING\n  project_slug: demo\n---\nbody");
     const config = resolveConfig(await loadWorkflow(workflowPath), {});
@@ -122,7 +122,7 @@ describe("workflow loader and config", () => {
   });
 
   test("dispatch validation rejects a claim state outside active states", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-workflow-"));
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(
       workflowPath,
@@ -133,7 +133,7 @@ describe("workflow loader and config", () => {
   });
 
   test("observability retention limits must be positive integers", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-workflow-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-workflow-"));
     const workflowPath = path.join(dir, "WORKFLOW.md");
     await writeFile(workflowPath, "---\ntracker:\n  kind: linear\n  api_key: $TOKEN\n  project_slug: demo\nobservability:\n  run_attempt_limit: 0\n---\nbody");
     const workflow = await loadWorkflow(workflowPath);

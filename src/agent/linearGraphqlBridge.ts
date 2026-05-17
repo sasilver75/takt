@@ -10,7 +10,7 @@ const MCP_ENDPOINT = "/mcp";
 const TOOL = {
   name: "linear_graphql",
   description: [
-    "Execute exactly one Linear GraphQL query or mutation using Symphony's configured tracker credential.",
+    "Execute exactly one Linear GraphQL query or mutation using Takt's configured tracker credential.",
     "Use this for Linear issue comments, state transitions, project-scoped reads, and handoff updates.",
     "Do not read Linear tokens from disk."
   ].join(" "),
@@ -151,7 +151,7 @@ async function handleMcpRequest(
     return rpcResult(id, {
       protocolVersion: protocolVersion(message),
       capabilities: { tools: {} },
-      serverInfo: { name: "symphony-linear", version: "0.1.0" }
+      serverInfo: { name: "takt-linear", version: "0.1.0" }
     });
   }
   if (method === "ping") return rpcResult(id, {});

@@ -13,20 +13,20 @@ describe("GitHub PR merger", () => {
       if (String(init?.method) === "DELETE") return new Response(null, { status: 204 });
       return jsonResponse({ message: "not found" }, 404);
     };
-    const merger = new GitHubPullRequestMerger(() => config("/tmp/symphony-gh-merge"), createLogger(() => undefined), fetchImpl);
+    const merger = new GitHubPullRequestMerger(() => config("/tmp/takt-gh-merge"), createLogger(() => undefined), fetchImpl);
 
     const result = await merger.merge({
       pullRequest: {
         number: 42,
         url: "https://github.test/acme/widgets/pull/42",
-        branch: "symphony/sam-42-merge-factory-pr",
+        branch: "takt/sam-42-merge-factory-pr",
         title: "SAM-42: Merge factory PR",
         created: false
       },
       inspection: {
         number: 42,
         url: "https://github.test/acme/widgets/pull/42",
-        branch: "symphony/sam-42-merge-factory-pr",
+        branch: "takt/sam-42-merge-factory-pr",
         title: "SAM-42: Merge factory PR",
         state: "open",
         checks_status: "success",
@@ -60,7 +60,7 @@ describe("GitHub PR merger", () => {
     });
     expect(requests[0]?.url).toBe("https://api.github.test/repos/acme/widgets/pulls/42/merge");
     expect(requests[1]).toMatchObject({ method: "DELETE" });
-    expect(requests[1]?.url).toBe("https://api.github.test/repos/acme/widgets/git/refs/heads/symphony/sam-42-merge-factory-pr");
+    expect(requests[1]?.url).toBe("https://api.github.test/repos/acme/widgets/git/refs/heads/takt/sam-42-merge-factory-pr");
   });
 });
 
@@ -86,9 +86,9 @@ function config(root: string): SymphonyConfig {
       token: "github-secret-token",
       remote: "origin",
       base_branch: "main",
-      branch_prefix: "symphony",
-      pr_ready_file: "SYMPHONY_PR_READY.json",
-      evidence_file: "SYMPHONY_EVIDENCE.json",
+      branch_prefix: "takt",
+      pr_ready_file: "TAKT_PR_READY.json",
+      evidence_file: "TAKT_EVIDENCE.json",
       draft: false,
       merge: {
         enabled: true,
@@ -113,7 +113,7 @@ function config(root: string): SymphonyConfig {
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 0,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }

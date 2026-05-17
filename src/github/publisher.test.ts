@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 
 describe("GitHub PR publisher", () => {
   test("pushes a committed worker branch and creates a pull request", async () => {
-    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-"));
+    const temp = await mkdtemp(path.join(os.tmpdir(), "takt-gh-"));
     const remote = path.join(temp, "remote.git");
     const seed = path.join(temp, "seed");
     const workspace = path.join(temp, "workspace");
@@ -21,7 +21,7 @@ describe("GitHub PR publisher", () => {
     await mkdir(seed);
     await git(seed, "init", "--initial-branch=main");
     await git(seed, "config", "user.name", "Symphony Test");
-    await git(seed, "config", "user.email", "symphony-test@example.invalid");
+    await git(seed, "config", "user.email", "takt-test@example.invalid");
     await writeFile(path.join(seed, "README.md"), "base\n");
     await git(seed, "add", "README.md");
     await git(seed, "commit", "-m", "base");
@@ -30,14 +30,14 @@ describe("GitHub PR publisher", () => {
     await git(temp, "clone", remote, workspace);
     await git(workspace, "checkout", "main");
     await git(workspace, "config", "user.name", "Symphony Worker");
-    await git(workspace, "config", "user.email", "symphony-worker@example.invalid");
+    await git(workspace, "config", "user.email", "takt-worker@example.invalid");
     await writeFile(path.join(workspace, "feature.txt"), "done\n");
     await git(workspace, "add", "feature.txt");
     await git(workspace, "commit", "-m", "Add feature");
     await mkdir(path.join(workspace, "artifacts", "SAM-123"), { recursive: true });
     await writeFile(path.join(workspace, "artifacts", "SAM-123", "home.png"), "fake screenshot\n");
-    await writeFile(path.join(workspace, "SYMPHONY_PR_READY.json"), "{}\n");
-    await writeFile(path.join(workspace, "SYMPHONY_EVIDENCE.json"), "{}\n");
+    await writeFile(path.join(workspace, "TAKT_PR_READY.json"), "{}\n");
+    await writeFile(path.join(workspace, "TAKT_EVIDENCE.json"), "{}\n");
 
     const requests: Array<{ method: string; url: string; body: unknown }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {
@@ -60,31 +60,31 @@ describe("GitHub PR publisher", () => {
     expect(published).toMatchObject({
       number: 42,
       url: "https://github.test/acme/widgets/pull/42",
-      branch: "symphony/sam-123-add-publish-loop",
+      branch: "takt/sam-123-add-publish-loop",
       created: true
     });
-    expect(await gitOut(workspace, "rev-parse", "--abbrev-ref", "HEAD")).toBe("symphony/sam-123-add-publish-loop");
-    expect(await gitOut(seed, "ls-remote", "--heads", remote, "symphony/sam-123-add-publish-loop")).toContain("refs/heads/symphony/sam-123-add-publish-loop");
+    expect(await gitOut(workspace, "rev-parse", "--abbrev-ref", "HEAD")).toBe("takt/sam-123-add-publish-loop");
+    expect(await gitOut(seed, "ls-remote", "--heads", remote, "takt/sam-123-add-publish-loop")).toContain("refs/heads/takt/sam-123-add-publish-loop");
     expect(requests.map((request) => request.method)).toEqual(["GET", "POST"]);
     expect(requests[1]?.body).toMatchObject({
       title: "SAM-123: Add publish loop",
-      head: "symphony/sam-123-add-publish-loop",
+      head: "takt/sam-123-add-publish-loop",
       base: "main",
       draft: false
     });
   });
 
   test("updates an existing pull request branch with force-with-lease after rebase", async () => {
-    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-update-"));
+    const temp = await mkdtemp(path.join(os.tmpdir(), "takt-gh-update-"));
     const remote = path.join(temp, "remote.git");
     const seed = path.join(temp, "seed");
     const workspace = path.join(temp, "workspace");
-    const branch = "symphony/sam-123-add-publish-loop";
+    const branch = "takt/sam-123-add-publish-loop";
     await git(temp, "init", "--bare", remote);
     await mkdir(seed);
     await git(seed, "init", "--initial-branch=main");
     await git(seed, "config", "user.name", "Symphony Test");
-    await git(seed, "config", "user.email", "symphony-test@example.invalid");
+    await git(seed, "config", "user.email", "takt-test@example.invalid");
     await writeFile(path.join(seed, "README.md"), "base\n");
     await git(seed, "add", "README.md");
     await git(seed, "commit", "-m", "base");
@@ -107,13 +107,13 @@ describe("GitHub PR publisher", () => {
     await git(temp, "clone", remote, workspace);
     await git(workspace, "checkout", branch);
     await git(workspace, "config", "user.name", "Symphony Worker");
-    await git(workspace, "config", "user.email", "symphony-worker@example.invalid");
+    await git(workspace, "config", "user.email", "takt-worker@example.invalid");
     await git(workspace, "fetch", "origin", "main");
     await git(workspace, "rebase", "origin/main");
     await writeFile(path.join(workspace, "followup.txt"), "review feedback addressed\n");
     await git(workspace, "add", "followup.txt");
     await git(workspace, "commit", "-m", "Address review feedback");
-    await writeFile(path.join(workspace, "SYMPHONY_PR_READY.json"), "{}\n");
+    await writeFile(path.join(workspace, "TAKT_PR_READY.json"), "{}\n");
     const workspaceHead = await gitOut(workspace, "rev-parse", "HEAD");
 
     const requests: Array<{ method: string; url: string; body: unknown }> = [];
@@ -140,7 +140,7 @@ describe("GitHub PR publisher", () => {
   });
 
   test("rejects committed handoff manifests before publishing", async () => {
-    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-gh-committed-manifest-"));
+    const temp = await mkdtemp(path.join(os.tmpdir(), "takt-gh-committed-manifest-"));
     const remote = path.join(temp, "remote.git");
     const seed = path.join(temp, "seed");
     const workspace = path.join(temp, "workspace");
@@ -148,7 +148,7 @@ describe("GitHub PR publisher", () => {
     await mkdir(seed);
     await git(seed, "init", "--initial-branch=main");
     await git(seed, "config", "user.name", "Symphony Test");
-    await git(seed, "config", "user.email", "symphony-test@example.invalid");
+    await git(seed, "config", "user.email", "takt-test@example.invalid");
     await writeFile(path.join(seed, "README.md"), "base\n");
     await git(seed, "add", "README.md");
     await git(seed, "commit", "-m", "base");
@@ -157,10 +157,10 @@ describe("GitHub PR publisher", () => {
     await git(temp, "clone", remote, workspace);
     await git(workspace, "checkout", "main");
     await git(workspace, "config", "user.name", "Symphony Worker");
-    await git(workspace, "config", "user.email", "symphony-worker@example.invalid");
+    await git(workspace, "config", "user.email", "takt-worker@example.invalid");
     await writeFile(path.join(workspace, "feature.txt"), "done\n");
-    await writeFile(path.join(workspace, "SYMPHONY_PR_READY.json"), "{}\n");
-    await git(workspace, "add", "feature.txt", "SYMPHONY_PR_READY.json");
+    await writeFile(path.join(workspace, "TAKT_PR_READY.json"), "{}\n");
+    await git(workspace, "add", "feature.txt", "TAKT_PR_READY.json");
     await git(workspace, "commit", "-m", "Accidentally commit handoff manifest");
 
     const publisher = new GitHubPullRequestPublisher(
@@ -179,7 +179,7 @@ describe("GitHub PR publisher", () => {
       })
     ).rejects.toMatchObject({
       code: "github_committed_handoff_manifest",
-      message: "Handoff manifest files must not be committed: SYMPHONY_PR_READY.json"
+      message: "Handoff manifest files must not be committed: TAKT_PR_READY.json"
     });
   });
 });
@@ -206,9 +206,9 @@ function config(root: string, remote: string): SymphonyConfig {
       token: "github-secret-token",
       remote,
       base_branch: "main",
-      branch_prefix: "symphony",
-      pr_ready_file: "SYMPHONY_PR_READY.json",
-      evidence_file: "SYMPHONY_EVIDENCE.json",
+      branch_prefix: "takt",
+      pr_ready_file: "TAKT_PR_READY.json",
+      evidence_file: "TAKT_EVIDENCE.json",
       draft: false,
       merge: {
         enabled: false,
@@ -233,7 +233,7 @@ function config(root: string, remote: string): SymphonyConfig {
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 0,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }

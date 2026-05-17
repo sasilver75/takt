@@ -30,7 +30,7 @@ describe("linear GraphQL loopback MCP bridge", () => {
     const options = {
       executor,
       issue: testIssue,
-      projectSlug: "gallatin-demo",
+      projectSlug: "takt",
       onEvent: (event: CodexRuntimeEvent) => events.push(event)
     };
 
@@ -66,7 +66,7 @@ describe("linear GraphQL loopback MCP bridge", () => {
     expect(JSON.parse(String(((result.body?.result as any).content[0] as any).text))).toMatchObject({
       success: true,
       context: {
-        project_slug: "gallatin-demo",
+        project_slug: "takt",
         current_issue_identifier: "SAM-1"
       }
     });
@@ -84,7 +84,7 @@ describe("linear GraphQL loopback MCP bridge", () => {
     const options = {
       executor,
       issue: testIssue,
-      projectSlug: "gallatin-demo",
+      projectSlug: "takt",
       onEvent: () => undefined
     };
 
@@ -133,7 +133,7 @@ describe("linear GraphQL loopback MCP bridge", () => {
     const options = {
       executor,
       issue: testIssue,
-      projectSlug: "gallatin-demo",
+      projectSlug: "takt",
       bearerToken: "bridge-token",
       onEvent: () => undefined
     };

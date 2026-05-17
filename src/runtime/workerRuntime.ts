@@ -64,16 +64,16 @@ function createHostRuntime(workspace: Workspace, issue: Issue, logger: Logger): 
 function createDockerRuntime(config: SymphonyConfig, workspace: Workspace, issue: Issue, logger: Logger): WorkerRuntimeLease {
   const docker = config.runtime.kind === "docker" ? config.runtime.docker : null;
   if (!docker) throw new SymphonyError("invalid_config_value", "Docker runtime configuration is missing");
-  const runKey = dockerName(`symphony-${workspace.workspace_key}-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`);
-  const runtimeRoot = path.join(os.tmpdir(), "symphony_runtime", runKey);
+  const runKey = dockerName(`takt-${workspace.workspace_key}-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`);
+  const runtimeRoot = path.join(os.tmpdir(), "takt_runtime", runKey);
   const mountedCodexHome = prepareEphemeralCodexHome(docker.codex_home, runtimeRoot);
   const portBase = 42000 + stableIssueOffset(workspace.workspace_key);
   const env = {
     ...runtimeEnv(issue, workspace.workspace_key, workspace.path, docker.workspace_mount, portBase),
     HOME: path.posix.dirname(docker.codex_home_mount),
     CODEX_HOME: docker.codex_home_mount,
-    TMPDIR: "/tmp/symphony",
-    COMPOSE_PROJECT_NAME: dockerName(`symphony_${workspace.workspace_key}`),
+    TMPDIR: "/tmp/takt",
+    COMPOSE_PROJECT_NAME: dockerName(`takt_${workspace.workspace_key}`),
     ...docker.environment
   };
   const bridgeBearerToken = randomBytes(32).toString("base64url");
@@ -182,13 +182,13 @@ function dockerRunArgs(
 
 function runtimeEnv(issue: Issue, workspaceKey: string, hostWorkspacePath: string, runtimeWorkspacePath: string, portBase: number): NodeJS.ProcessEnv {
   return {
-    SYMPHONY_RUN_ID: `${workspaceKey}-${Date.now().toString(36)}`,
-    SYMPHONY_ISSUE_ID: issue.id,
-    SYMPHONY_ISSUE_IDENTIFIER: issue.identifier,
-    SYMPHONY_WORKSPACE_KEY: workspaceKey,
-    SYMPHONY_HOST_WORKSPACE: hostWorkspacePath,
-    SYMPHONY_RUNTIME_WORKSPACE: runtimeWorkspacePath,
-    SYMPHONY_PORT_BASE: String(portBase),
+    TAKT_RUN_ID: `${workspaceKey}-${Date.now().toString(36)}`,
+    TAKT_ISSUE_ID: issue.id,
+    TAKT_ISSUE_IDENTIFIER: issue.identifier,
+    TAKT_WORKSPACE_KEY: workspaceKey,
+    TAKT_HOST_WORKSPACE: hostWorkspacePath,
+    TAKT_RUNTIME_WORKSPACE: runtimeWorkspacePath,
+    TAKT_PORT_BASE: String(portBase),
     PORT: String(portBase),
     APP_PORT: String(portBase),
     VITE_PORT: String(portBase + 1),

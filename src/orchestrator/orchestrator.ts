@@ -1574,7 +1574,7 @@ function renderPullRequestFollowupContext(
     "- Inspect the existing workspace and branch.",
     "- Fix the PR feedback or failing verification.",
     "- Commit the follow-up changes.",
-    `- Update ${prReadyFile} so Symphony can update the existing PR.`
+    `- Update ${prReadyFile} so Takt can update the existing PR.`
   ];
   const failingChecks = actionableChecks(inspection);
   if (failingChecks.length > 0) {

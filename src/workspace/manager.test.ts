@@ -38,7 +38,7 @@ function config(root: string, hooks: Partial<SymphonyConfig["hooks"]> = {}): Sym
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 1000,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
@@ -54,9 +54,9 @@ function githubDisabled(): SymphonyConfig["github"] {
     token: null,
     remote: "origin",
     base_branch: "main",
-    branch_prefix: "symphony",
-    pr_ready_file: "SYMPHONY_PR_READY.json",
-    evidence_file: "SYMPHONY_EVIDENCE.json",
+    branch_prefix: "takt",
+    pr_ready_file: "TAKT_PR_READY.json",
+    evidence_file: "TAKT_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };
@@ -76,7 +76,7 @@ function githubMergeDisabled(): SymphonyConfig["github"]["merge"] {
 
 describe("workspace manager", () => {
   test("creates deterministic sanitized workspace path and reuses it", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-ws-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-ws-"));
     const manager = new WorkspaceManager(() => config(root), createLogger(() => undefined));
     const first = await manager.createForIssue("ABC/1 unsafe");
     const second = await manager.createForIssue("ABC/1 unsafe");
@@ -87,7 +87,7 @@ describe("workspace manager", () => {
   });
 
   test("runs hooks with required failure semantics", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-ws-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-ws-"));
     const manager = new WorkspaceManager(
       () =>
         config(root, {
@@ -107,7 +107,7 @@ describe("workspace manager", () => {
   });
 
   test("fatal hooks abort and containment is enforced", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-ws-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-ws-"));
     const manager = new WorkspaceManager(() => config(root, { after_create: "exit 9" }), createLogger(() => undefined));
     await expect(manager.createForIssue("ABC-1")).rejects.toMatchObject({ code: "hook_error" });
     await writeFile(path.join(root, "ABC-2"), "file");
@@ -116,13 +116,13 @@ describe("workspace manager", () => {
   });
 
   test("before_run hook can fast-forward a reused git workspace", async () => {
-    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-ws-git-"));
+    const temp = await mkdtemp(path.join(os.tmpdir(), "takt-ws-git-"));
     const source = path.join(temp, "source");
     const root = path.join(temp, "workspaces");
     await mkdir(source);
     await git(source, "init", "--initial-branch=main");
     await git(source, "config", "user.name", "Symphony Test");
-    await git(source, "config", "user.email", "symphony-test@example.invalid");
+    await git(source, "config", "user.email", "takt-test@example.invalid");
     await writeFile(path.join(source, "README.md"), "one\n");
     await git(source, "add", "README.md");
     await git(source, "commit", "-m", "initial");

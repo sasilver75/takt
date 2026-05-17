@@ -17,7 +17,7 @@ import type {
 import { SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import { GitHubApiClient, type FetchLike } from "./client.js";
-import { SYMPHONY_EVIDENCE_COMMENT_MARKER } from "./evidence.js";
+import { TAKT_EVIDENCE_COMMENT_MARKER } from "./evidence.js";
 
 export class GitHubPullRequestTracker implements PullRequestTracker {
   private readonly api: GitHubApiClient;
@@ -394,5 +394,5 @@ function readNestedString(record: Record<string, unknown>, path: string[]): stri
 }
 
 function isSymphonyEvidenceComment(body: string): boolean {
-  return body.includes(SYMPHONY_EVIDENCE_COMMENT_MARKER);
+  return body.includes(TAKT_EVIDENCE_COMMENT_MARKER);
 }

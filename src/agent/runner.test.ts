@@ -10,7 +10,7 @@ import { FakeTracker, issue } from "../testing/fakes.js";
 
 describe("agent runner with fake Codex app-server", () => {
   test("launches app-server in workspace cwd, extracts session IDs, and records usage events", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-agent-"));
     const serverPath = path.join(root, "fake-codex.mjs");
     await writeFile(serverPath, fakeCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -41,7 +41,7 @@ describe("agent runner with fake Codex app-server", () => {
   });
 
   test("fails the run when Codex requests user input", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-user-input-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-agent-user-input-"));
     const serverPath = path.join(root, "fake-codex-user-input.mjs");
     await writeFile(serverPath, fakeCodexUserInputServerSource());
     await chmod(serverPath, 0o755);
@@ -73,7 +73,7 @@ describe("agent runner with fake Codex app-server", () => {
   });
 
   test("continues active issues on the same app-server thread up to max turns", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-continuation-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-agent-continuation-"));
     const serverPath = path.join(root, "fake-codex-continuation.mjs");
     await writeFile(serverPath, fakeContinuationCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -111,7 +111,7 @@ describe("agent runner with fake Codex app-server", () => {
   });
 
   test("classifies app-server request timeouts", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-response-timeout-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-agent-response-timeout-"));
     const serverPath = path.join(root, "fake-codex-no-response.mjs");
     await writeFile(serverPath, fakeNoResponseCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -132,7 +132,7 @@ describe("agent runner with fake Codex app-server", () => {
   });
 
   test("classifies app-server turn timeouts", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-turn-timeout-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-agent-turn-timeout-"));
     const serverPath = path.join(root, "fake-codex-hanging-turn.mjs");
     await writeFile(serverPath, fakeHangingTurnCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -153,7 +153,7 @@ describe("agent runner with fake Codex app-server", () => {
   });
 
   test("returns unsupported dynamic tool failures without stalling the turn", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-agent-unsupported-tool-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-agent-unsupported-tool-"));
     const serverPath = path.join(root, "fake-codex-unsupported-tool.mjs");
     await writeFile(serverPath, fakeUnsupportedToolCallServerSource());
     await chmod(serverPath, 0o755);
@@ -210,7 +210,7 @@ function config(root: string, command: string): SymphonyConfig {
       turn_timeout_ms: 2000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 1000,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
@@ -226,9 +226,9 @@ function githubDisabled(): SymphonyConfig["github"] {
     token: null,
     remote: "origin",
     base_branch: "main",
-    branch_prefix: "symphony",
-    pr_ready_file: "SYMPHONY_PR_READY.json",
-    evidence_file: "SYMPHONY_EVIDENCE.json",
+    branch_prefix: "takt",
+    pr_ready_file: "TAKT_PR_READY.json",
+    evidence_file: "TAKT_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };

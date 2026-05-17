@@ -6,8 +6,8 @@ import { GitHubApiClient, type GitHubMethod, type FetchLike } from "../github/cl
 import { LinearTrackerClient } from "../tracker/linear.js";
 import { loadWorkflow } from "../workflow/loader.js";
 
-export const LIVE_INTEGRATION_FLAG = "SYMPHONY_LIVE_INTEGRATION";
-export const LIVE_WORKFLOW_ENV = "SYMPHONY_LIVE_WORKFLOW";
+export const LIVE_INTEGRATION_FLAG = "TAKT_LIVE_INTEGRATION";
+export const LIVE_WORKFLOW_ENV = "TAKT_LIVE_WORKFLOW";
 const DEFAULT_LIVE_WORKFLOW = "examples/WORKFLOW.md";
 
 export type LiveIntegrationPlan = {

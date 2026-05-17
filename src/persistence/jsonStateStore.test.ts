@@ -8,7 +8,7 @@ import { JsonDurableStateStore } from "./jsonStateStore.js";
 
 describe("JSON durable state store", () => {
   test("saves and loads a versioned orchestration snapshot", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-state-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-state-"));
     const store = new JsonDurableStateStore(() => config(root), createLogger(() => undefined));
     const snapshot = durableSnapshot();
 
@@ -18,7 +18,7 @@ describe("JSON durable state store", () => {
   });
 
   test("returns null for corrupt state without throwing", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-state-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-state-"));
     const logs: string[] = [];
     const store = new JsonDurableStateStore(() => config(root), createLogger((line) => logs.push(line)));
     await store.save(durableSnapshot());
@@ -57,7 +57,7 @@ function durableSnapshot(): DurableStateSnapshot {
           }
         ],
         recent_events: [{ at: "2026-05-15T00:00:00.000Z", event: "worker_exit_abnormal", issue_id: "issue-1", issue_identifier: "SAM-1", message: "failed" }],
-        tracked: { github_pull_request: { number: 1, url: "https://github.test/pr/1", branch: "symphony/sam-1", title: "SAM-1", created: true } }
+        tracked: { github_pull_request: { number: 1, url: "https://github.test/pr/1", branch: "takt/sam-1", title: "SAM-1", created: true } }
       }
     ],
     recent_events: [{ at: "2026-05-15T00:00:00.000Z", event: "dispatch", issue_id: "issue-1", issue_identifier: "SAM-1" }],
@@ -88,9 +88,9 @@ function config(root: string): SymphonyConfig {
       token: null,
       remote: "origin",
       base_branch: "main",
-      branch_prefix: "symphony",
-      pr_ready_file: "SYMPHONY_PR_READY.json",
-      evidence_file: "SYMPHONY_EVIDENCE.json",
+      branch_prefix: "takt",
+      pr_ready_file: "TAKT_PR_READY.json",
+      evidence_file: "TAKT_EVIDENCE.json",
       draft: false,
       merge: {
         enabled: false,
@@ -115,7 +115,7 @@ function config(root: string): SymphonyConfig {
       turn_timeout_ms: 1000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 0,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }

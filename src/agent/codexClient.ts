@@ -57,7 +57,7 @@ export class CodexAppServerClient {
     });
     createInterface({ input: this.child.stdout }).on("line", (line) => this.handleLine(line));
     await this.request("initialize", {
-      clientInfo: { name: "symphony", title: "Symphony", version: "0.1.0" },
+      clientInfo: { name: "takt", title: "Takt", version: "0.1.0" },
       capabilities: { experimentalApi: true }
     });
   }
@@ -67,15 +67,15 @@ export class CodexAppServerClient {
       cwd: this.options.runtime.runtimeWorkspacePath,
       approvalPolicy: this.options.config.codex.approval_policy,
       sandbox: this.options.config.codex.thread_sandbox,
-      serviceName: "symphony",
+      serviceName: "takt",
       ephemeral: false,
       baseInstructions: [
-        "You are running under Symphony, an automated software production orchestrator.",
+        "You are running under Takt, an automated software production runtime.",
         this.options.config.codex.linear_graphql_mcp.enabled
-          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads. Do not use other Linear integrations, do not use raw Linear credentials from disk, and do not inspect Symphony harness internals.`
-          : "Use only workflow-approved tools for issue context, never read raw tracker credentials from disk, and do not inspect Symphony harness internals.",
+          ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads. Do not use other Linear integrations, do not use raw Linear credentials from disk, and do not inspect Takt runtime internals.`
+          : "Use only workflow-approved tools for issue context, never read raw tracker credentials from disk, and do not inspect Takt runtime internals.",
         this.options.config.github.enabled
-          ? `When implementation work is ready for PR review, commit all code changes and write ${this.options.config.github.pr_ready_file} in the workspace root as JSON with title, summary, verification, and risk fields. If you ran an app or captured reviewer evidence, also write ${this.options.config.github.evidence_file} with summary, verification, app_urls, artifacts, and notes. Do not create the GitHub PR yourself and do not move the issue to review; Symphony will publish the PR, evidence, and tracker updates.`
+          ? `When implementation work is ready for PR review, commit all code changes and write ${this.options.config.github.pr_ready_file} in the workspace root as JSON with title, summary, verification, and risk fields. If you ran an app or captured reviewer evidence, also write ${this.options.config.github.evidence_file} with summary, verification, app_urls, artifacts, and notes. Do not create the GitHub PR yourself and do not move the issue to review; Takt will publish the PR, evidence, and tracker updates.`
           : "Follow the workflow prompt for handoff."
       ].join("\n")
     })) as JsonObject;
@@ -203,7 +203,7 @@ export class CodexAppServerClient {
         this.emit("approval_auto_approved", { message: method });
       } else if (method === "item/tool/requestUserInput") {
         result = { answers: {} };
-        const error = new SymphonyError("turn_input_required", "Codex requested user input and Symphony policy fails the turn");
+        const error = new SymphonyError("turn_input_required", "Codex requested user input and Takt policy fails the turn");
         this.emit("turn_input_required", { message: error.message });
         this.failTurnFromParams(message.params, error);
       } else if (method === "mcpServer/elicitation/request") {

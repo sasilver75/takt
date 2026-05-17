@@ -24,7 +24,7 @@ export class GitHubPullRequestMerger implements PullRequestMerger {
       sha: input.inspection.head_sha,
       merge_method: config.merge.method,
       commit_title: `${input.pullRequest.title} (#${input.pullRequest.number})`,
-      commit_message: `Merged by Symphony.\n\n${input.pullRequest.url}`
+      commit_message: `Merged by Takt.\n\n${input.pullRequest.url}`
     });
     const result = readMergeResult(input.pullRequest.number, input.pullRequest.url, payload);
     if (!result.merged) return result;

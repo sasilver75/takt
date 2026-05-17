@@ -32,7 +32,7 @@ describe("orchestrator", () => {
   });
 
   test("dispatches eligible issues, records token totals, and schedules continuation retry", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-"));
     const serverPath = path.join(root, "fake-codex.mjs");
     await writeFile(serverPath, fakeCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -79,7 +79,7 @@ describe("orchestrator", () => {
   });
 
   test("does not use completed bookkeeping as a generic dispatch gate", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-completed-bookkeeping-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-completed-bookkeeping-"));
     const serverPath = path.join(root, "fake-codex.mjs");
     await writeFile(serverPath, fakeCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -107,7 +107,7 @@ describe("orchestrator", () => {
   });
 
   test("blocked Todo issue is not dispatched", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-"));
     const cfg = config(root, "node missing.js");
     const blocked = issue({ blocked_by: [{ id: "b", identifier: "ABC-0", state: "Todo" }] });
     const tracker = new FakeTracker([blocked], [], []);
@@ -125,7 +125,7 @@ describe("orchestrator", () => {
   });
 
   test("Todo issue with terminal blockers remains eligible", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-terminal-blocker-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-terminal-blocker-"));
     const serverPath = path.join(root, "fake-codex.mjs");
     await writeFile(serverPath, fakeCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -151,7 +151,7 @@ describe("orchestrator", () => {
   });
 
   test("reconciliation records terminal and non-active run termination outcomes", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-reconcile-terminate-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-reconcile-terminate-"));
     const serverPath = path.join(root, "fake-codex-long-running.mjs");
     await writeFile(serverPath, fakeLongRunningCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -206,7 +206,7 @@ describe("orchestrator", () => {
   });
 
   test("stall detection records termination and schedules retry", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-stall-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-stall-"));
     const serverPath = path.join(root, "fake-codex-long-running.mjs");
     await writeFile(serverPath, fakeLongRunningCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -238,7 +238,7 @@ describe("orchestrator", () => {
   });
 
   test("trims observability history using workflow limits", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-observe-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-observe-"));
     const cfg = {
       ...config(root, "node missing.js"),
       observability: { recent_event_limit: 2, issue_event_limit: 1, run_attempt_limit: 1 }
@@ -305,7 +305,7 @@ describe("orchestrator", () => {
   });
 
   test("claims an issue, publishes PR-ready worker commits, comments, and moves to review", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -330,7 +330,7 @@ describe("orchestrator", () => {
     const publisher: PullRequestPublisher = {
       async publish(input) {
         published.push(input);
-        return { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9-ship-pr-loop", title: "SAM-9: Ship PR loop", created: true };
+        return { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "takt/sam-9-ship-pr-loop", title: "SAM-9: Ship PR loop", created: true };
       }
     };
     const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
@@ -378,7 +378,7 @@ describe("orchestrator", () => {
   });
 
   test("publishes worker evidence manifest back to the pull request", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-evidence-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-evidence-"));
     const serverPath = path.join(root, "fake-codex-evidence.mjs");
     await writeFile(serverPath, fakePrReadyWithEvidenceCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -403,7 +403,7 @@ describe("orchestrator", () => {
     const publisher: PullRequestPublisher = {
       async publish(input) {
         prPublishInputs.push(input);
-        return { number: 18, url: "https://github.test/acme/widgets/pull/18", branch: "symphony/sam-18-publish-evidence", title: "SAM-18: Publish evidence", created: true };
+        return { number: 18, url: "https://github.test/acme/widgets/pull/18", branch: "takt/sam-18-publish-evidence", title: "SAM-18: Publish evidence", created: true };
       }
     };
     const evidencePublished: unknown[] = [];
@@ -433,14 +433,14 @@ describe("orchestrator", () => {
       manifest: {
         summary: "Verified with Playwright.",
         verification: ["pnpm test", "npx playwright test"],
-        commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
+        commands: [{ kind: "capture", status: "succeeded", command: "takt-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
         app_urls: ["http://127.0.0.1:3000"],
         artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
       }
     });
     expect(prPublishInputs[0]).toMatchObject({
       evidenceManifest: {
-        commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
+        commands: [{ kind: "capture", status: "succeeded", command: "takt-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
         artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
       }
     });
@@ -450,7 +450,7 @@ describe("orchestrator", () => {
         github_evidence_comment_url: "https://github.test/acme/widgets/pull/18#issuecomment-1818",
         github_evidence_warnings: ["Artifact path is not tracked by git at publish time"],
         github_evidence_manifest: {
-          commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
+          commands: [{ kind: "capture", status: "succeeded", command: "takt-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
           artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
         }
       }
@@ -464,7 +464,7 @@ describe("orchestrator", () => {
             warnings: ["Artifact path is not tracked by git at publish time"],
             manifest: {
               verification: ["pnpm test", "npx playwright test"],
-              commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
+              commands: [{ kind: "capture", status: "succeeded", command: "takt-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
               app_urls: ["http://127.0.0.1:3000"],
               artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png" }]
             }
@@ -476,7 +476,7 @@ describe("orchestrator", () => {
   });
 
   test("fails PR publication visibly when worker evidence manifest is malformed", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-bad-evidence-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-bad-evidence-"));
     const serverPath = path.join(root, "fake-codex-bad-evidence.mjs");
     await writeFile(serverPath, fakePrReadyWithMalformedEvidenceCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -501,7 +501,7 @@ describe("orchestrator", () => {
     const publisher: PullRequestPublisher = {
       async publish(input) {
         published.push(input);
-        return { number: 24, url: "https://github.test/acme/widgets/pull/24", branch: "symphony/sam-24-bad-evidence-manifest", title: "SAM-24: Bad evidence manifest", created: true };
+        return { number: 24, url: "https://github.test/acme/widgets/pull/24", branch: "takt/sam-24-bad-evidence-manifest", title: "SAM-24: Bad evidence manifest", created: true };
       }
     };
     const orchestrator = new Orchestrator({
@@ -521,18 +521,18 @@ describe("orchestrator", () => {
     expect(tracker.getIssue("i-pr-bad-evidence")?.state).toBe("In Progress");
     expect(orchestrator.issueSnapshot("SAM-24")).toMatchObject({
       status: "retrying",
-      last_error: "SYMPHONY_EVIDENCE.json must contain valid JSON"
+      last_error: "TAKT_EVIDENCE.json must contain valid JSON"
     });
     expect(
       (orchestrator.snapshot() as { recent_events: Array<{ event: string; message?: string | null }> }).recent_events.some(
-        (event) => event.event === "pull_request_publish_failed" && event.message === "SYMPHONY_EVIDENCE.json must contain valid JSON"
+        (event) => event.event === "pull_request_publish_failed" && event.message === "TAKT_EVIDENCE.json must contain valid JSON"
       )
     ).toBe(true);
     await orchestrator.stop();
   });
 
   test("clears stale durable last_error after successful PR publication", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-clear-error-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-clear-error-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -586,7 +586,7 @@ describe("orchestrator", () => {
     const publisher: PullRequestPublisher = {
       async publish(input) {
         published.push(input);
-        return { number: 15, url: "https://github.test/acme/widgets/pull/15", branch: "symphony/sam-15-clear-stale-error", title: "SAM-15: Clear stale error", created: true };
+        return { number: 15, url: "https://github.test/acme/widgets/pull/15", branch: "takt/sam-15-clear-stale-error", title: "SAM-15: Clear stale error", created: true };
       }
     };
     const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
@@ -614,7 +614,7 @@ describe("orchestrator", () => {
   });
 
   test("reconciles tracker review state for open PRs after external automation moves it back", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-review-state-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-review-state-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -637,7 +637,7 @@ describe("orchestrator", () => {
     const tracker = new LocalTracker([activeIssue]);
     const publisher: PullRequestPublisher = {
       async publish() {
-        return { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "symphony/sam-9-ship-pr-loop", title: "SAM-9: Ship PR loop", created: true };
+        return { number: 9, url: "https://github.test/acme/widgets/pull/9", branch: "takt/sam-9-ship-pr-loop", title: "SAM-9: Ship PR loop", created: true };
       }
     };
     const pullRequestTracker: PullRequestTracker = {
@@ -645,7 +645,7 @@ describe("orchestrator", () => {
         return {
           number: 9,
           url: "https://github.test/acme/widgets/pull/9",
-          branch: "symphony/sam-9-ship-pr-loop",
+          branch: "takt/sam-9-ship-pr-loop",
           title: "SAM-9: Ship PR loop",
           state: "open",
           checks_status: "success",
@@ -687,7 +687,7 @@ describe("orchestrator", () => {
   });
 
   test("merges approved passing PRs and moves the tracker issue to completion state", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-merge-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-merge-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -712,7 +712,7 @@ describe("orchestrator", () => {
     const tracker = new LocalTracker([activeIssue]);
     const publisher: PullRequestPublisher = {
       async publish() {
-        return { number: 16, url: "https://github.test/acme/widgets/pull/16", branch: "symphony/sam-16-merge-approved-pr", title: "SAM-16: Merge approved PR", created: true };
+        return { number: 16, url: "https://github.test/acme/widgets/pull/16", branch: "takt/sam-16-merge-approved-pr", title: "SAM-16: Merge approved PR", created: true };
       }
     };
     const pullRequestTracker: PullRequestTracker = {
@@ -764,7 +764,7 @@ describe("orchestrator", () => {
   });
 
   test("does not merge PRs that have not satisfied the configured policy", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-merge-wait-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-merge-wait-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -788,7 +788,7 @@ describe("orchestrator", () => {
     const tracker = new LocalTracker([activeIssue]);
     const publisher: PullRequestPublisher = {
       async publish() {
-        return { number: 17, url: "https://github.test/acme/widgets/pull/17", branch: "symphony/sam-17-wait-for-merge-policy", title: "SAM-17: Wait for merge policy", created: true };
+        return { number: 17, url: "https://github.test/acme/widgets/pull/17", branch: "takt/sam-17-wait-for-merge-policy", title: "SAM-17: Wait for merge policy", created: true };
       }
     };
     const pullRequestTracker: PullRequestTracker = {
@@ -797,7 +797,7 @@ describe("orchestrator", () => {
           ...approvedInspection(),
           number: 17,
           url: "https://github.test/acme/widgets/pull/17",
-          branch: "symphony/sam-17-wait-for-merge-policy",
+          branch: "takt/sam-17-wait-for-merge-policy",
           title: "SAM-17: Wait for merge policy",
           checks_status: "pending",
           summary: "PR #17 is open; checks=pending; review=approved at merge-head-sha."
@@ -836,7 +836,7 @@ describe("orchestrator", () => {
   });
 
   test("requeues worker follow-up when a published PR has failing checks", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-followup-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-followup-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -861,7 +861,7 @@ describe("orchestrator", () => {
     const publisher: PullRequestPublisher = {
       async publish(input) {
         published.push(input);
-        return { number: 10, url: "https://github.test/acme/widgets/pull/10", branch: "symphony/sam-10-close-pr-loop", title: "SAM-10: Close PR loop", created: published.length === 1 };
+        return { number: 10, url: "https://github.test/acme/widgets/pull/10", branch: "takt/sam-10-close-pr-loop", title: "SAM-10: Close PR loop", created: published.length === 1 };
       }
     };
     const pullRequestTracker: PullRequestTracker = {
@@ -900,7 +900,7 @@ describe("orchestrator", () => {
   });
 
   test("does not requeue stale changes-requested reviews after a worker follow-up push", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-stale-review-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-stale-review-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -925,7 +925,7 @@ describe("orchestrator", () => {
     const publisher: PullRequestPublisher = {
       async publish(input) {
         published.push(input);
-        return { number: 13, url: "https://github.test/acme/widgets/pull/13", branch: "symphony/sam-13-handle-stale-review", title: "SAM-13: Handle stale review", created: published.length === 1 };
+        return { number: 13, url: "https://github.test/acme/widgets/pull/13", branch: "takt/sam-13-handle-stale-review", title: "SAM-13: Handle stale review", created: published.length === 1 };
       }
     };
     let inspectCount = 0;
@@ -966,7 +966,7 @@ describe("orchestrator", () => {
   });
 
   test("requeues comment-only PR review feedback and includes comments in worker context", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-comments-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-comments-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -991,7 +991,7 @@ describe("orchestrator", () => {
     const publisher: PullRequestPublisher = {
       async publish(input) {
         published.push(input);
-        return { number: 14, url: "https://github.test/acme/widgets/pull/14", branch: "symphony/sam-14-handle-comment-review", title: "SAM-14: Handle comment review", created: published.length === 1 };
+        return { number: 14, url: "https://github.test/acme/widgets/pull/14", branch: "takt/sam-14-handle-comment-review", title: "SAM-14: Handle comment review", created: published.length === 1 };
       }
     };
     const pullRequestTracker: PullRequestTracker = {
@@ -1025,7 +1025,7 @@ describe("orchestrator", () => {
   });
 
   test("requeues top-level PR comments and unresolved review threads", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-thread-comments-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-thread-comments-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -1050,7 +1050,7 @@ describe("orchestrator", () => {
     const publisher: PullRequestPublisher = {
       async publish(input) {
         published.push(input);
-        return { number: 19, url: "https://github.test/acme/widgets/pull/19", branch: "symphony/sam-19-handle-pr-comments", title: "SAM-19: Handle PR comments", created: published.length === 1 };
+        return { number: 19, url: "https://github.test/acme/widgets/pull/19", branch: "takt/sam-19-handle-pr-comments", title: "SAM-19: Handle PR comments", created: published.length === 1 };
       }
     };
     const pullRequestTracker: PullRequestTracker = {
@@ -1085,7 +1085,7 @@ describe("orchestrator", () => {
   });
 
   test("does not requeue an already handled review thread when GitHub moves the thread commit to the new head", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-thread-stable-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-thread-stable-"));
     const serverPath = path.join(root, "fake-codex-ready.mjs");
     await writeFile(serverPath, fakePrReadyCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -1113,7 +1113,7 @@ describe("orchestrator", () => {
         return {
           number: 20,
           url: "https://github.test/acme/widgets/pull/20",
-          branch: "symphony/sam-20-handle-moving-review-thread",
+          branch: "takt/sam-20-handle-moving-review-thread",
           title: "SAM-20: Handle moving review thread",
           created: published.length === 1
         };
@@ -1151,7 +1151,7 @@ describe("orchestrator", () => {
   });
 
   test("does not requeue recovered stale review feedback from a previous PR head", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-stale-recovered-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-stale-recovered-"));
     const cfg = {
       ...config(root, "node missing.js"),
       tracker: {
@@ -1200,8 +1200,8 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
-  test("recovers open Symphony PRs after restart and suppresses duplicate dispatch", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-recover-"));
+  test("recovers open Takt PRs after restart and suppresses duplicate dispatch", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-recover-"));
     const cfg = {
       ...config(root, "node missing.js"),
       tracker: {
@@ -1252,8 +1252,8 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
-  test("recovers human-merged Symphony PRs after restart and moves tracker issue to completion", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-recover-merged-"));
+  test("recovers human-merged Takt PRs after restart and moves tracker issue to completion", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-recover-merged-"));
     const cfg = {
       ...config(root, "node missing.js"),
       tracker: {
@@ -1310,7 +1310,7 @@ describe("orchestrator", () => {
   });
 
   test("reconcileOnce runs PR lifecycle reconciliation without dispatching candidate work", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-reconcile-once-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-reconcile-once-"));
     const cfg = {
       ...config(root, "node missing.js"),
       tracker: {
@@ -1361,7 +1361,7 @@ describe("orchestrator", () => {
   });
 
   test("ignores restored PR tracking outside the current branch prefix", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-pr-prefix-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-pr-prefix-"));
     const cfg = {
       ...config(root, "node missing.js"),
       github: {
@@ -1370,7 +1370,7 @@ describe("orchestrator", () => {
         owner: "acme",
         repo: "widgets",
         token: "github-token",
-        branch_prefix: "symphony-test"
+        branch_prefix: "takt-test"
       }
     };
     const tracker = new LocalTracker([issue({ id: "i-pr-prefix", identifier: "SAM-21", state: "Needs Human", title: "Old managed PR" })]);
@@ -1403,7 +1403,7 @@ describe("orchestrator", () => {
         github_pull_request: {
           number: 21,
           url: "https://github.test/acme/widgets/pull/21",
-          branch: "symphony/sam-21-old-managed-pr",
+          branch: "takt/sam-21-old-managed-pr",
           title: "SAM-21: Old managed PR",
           created: false
         }
@@ -1418,7 +1418,7 @@ describe("orchestrator", () => {
   });
 
   test("restores durable retry queue and issue history on startup", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-durable-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-durable-"));
     const cfg = config(root, "node missing.js");
     const saved: DurableStateSnapshot[] = [];
     const durableStore: DurableStateStore = {
@@ -1466,7 +1466,7 @@ describe("orchestrator", () => {
   });
 
   test("releases retry claim for missing candidates without marking completed", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-retry-release-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-retry-release-"));
     const cfg = config(root, "node missing.js");
     const retryIssueId = "retry-missing";
     const durableStore: DurableStateStore = {
@@ -1511,7 +1511,7 @@ describe("orchestrator", () => {
   });
 
   test("requeues due retries when worker slots are exhausted", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-retry-slots-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-retry-slots-"));
     const serverPath = path.join(root, "fake-codex-long-running.mjs");
     await writeFile(serverPath, fakeLongRunningCodexServerSource());
     await chmod(serverPath, 0o755);
@@ -1604,7 +1604,7 @@ function config(root: string, command: string): SymphonyConfig {
       turn_timeout_ms: 2000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 0,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
@@ -1626,7 +1626,7 @@ rl.on("line", (line) => {
     appendFileSync("prompts.log", text + "\\n---\\n");
     send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
     setTimeout(() => {
-      writeFileSync("SYMPHONY_PR_READY.json", JSON.stringify({ title: "SAM-9: Ship PR loop", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
+      writeFileSync("TAKT_PR_READY.json", JSON.stringify({ title: "SAM-9: Ship PR loop", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
       send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
       send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
     }, 10);
@@ -1650,11 +1650,11 @@ rl.on("line", (line) => {
     setTimeout(() => {
       mkdirSync("artifacts/SAM-18", { recursive: true });
       writeFileSync("artifacts/SAM-18/home.png", "fake image");
-      writeFileSync("SYMPHONY_PR_READY.json", JSON.stringify({ title: "SAM-18: Publish evidence", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
-      writeFileSync("SYMPHONY_EVIDENCE.json", JSON.stringify({
+      writeFileSync("TAKT_PR_READY.json", JSON.stringify({ title: "SAM-18: Publish evidence", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
+      writeFileSync("TAKT_EVIDENCE.json", JSON.stringify({
         summary: "Verified with Playwright.",
         verification: ["pnpm test", "npx playwright test"],
-        commands: [{ kind: "capture", status: "succeeded", command: "symphony-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
+        commands: [{ kind: "capture", status: "succeeded", command: "takt-capture-url http://127.0.0.1:3000 artifacts/SAM-18/home.png" }],
         app_urls: ["http://127.0.0.1:3000"],
         artifacts: [{ kind: "screenshot", path: "artifacts/SAM-18/home.png", description: "Home page after change." }],
         notes: "No known reviewer caveats."
@@ -1680,8 +1680,8 @@ rl.on("line", (line) => {
   if (msg.method === "turn/start") {
     send({ id: msg.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
     setTimeout(() => {
-      writeFileSync("SYMPHONY_PR_READY.json", JSON.stringify({ title: "SAM-24: Bad evidence manifest", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
-      writeFileSync("SYMPHONY_EVIDENCE.json", "{");
+      writeFileSync("TAKT_PR_READY.json", JSON.stringify({ title: "SAM-24: Bad evidence manifest", summary: "Done", verification: ["pnpm test"], risk: "Low" }));
+      writeFileSync("TAKT_EVIDENCE.json", "{");
       send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
       send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
     }, 10);
@@ -1694,7 +1694,7 @@ function failingInspection(): PullRequestInspection {
   return {
     number: 10,
     url: "https://github.test/acme/widgets/pull/10",
-    branch: "symphony/sam-10-close-pr-loop",
+    branch: "takt/sam-10-close-pr-loop",
     title: "SAM-10: Close PR loop",
     state: "open",
     checks_status: "failure",
@@ -1714,7 +1714,7 @@ function changesRequestedInspection(headSha: string): PullRequestInspection {
   return {
     number: 13,
     url: "https://github.test/acme/widgets/pull/13",
-    branch: "symphony/sam-13-handle-stale-review",
+    branch: "takt/sam-13-handle-stale-review",
     title: "SAM-13: Handle stale review",
     state: "open",
     checks_status: "success",
@@ -1743,7 +1743,7 @@ function commentOnlyInspection(): PullRequestInspection {
   return {
     number: 14,
     url: "https://github.test/acme/widgets/pull/14",
-    branch: "symphony/sam-14-handle-comment-review",
+    branch: "takt/sam-14-handle-comment-review",
     title: "SAM-14: Handle comment review",
     state: "open",
     checks_status: "success",
@@ -1784,7 +1784,7 @@ function conversationAndThreadInspection(): PullRequestInspection {
   return {
     number: 19,
     url: "https://github.test/acme/widgets/pull/19",
-    branch: "symphony/sam-19-handle-pr-comments",
+    branch: "takt/sam-19-handle-pr-comments",
     title: "SAM-19: Handle PR comments",
     state: "open",
     checks_status: "success",
@@ -1858,7 +1858,7 @@ function movingReviewThreadInspection(headSha: string): PullRequestInspection {
   return {
     number: 20,
     url: "https://github.test/acme/widgets/pull/20",
-    branch: "symphony/sam-20-handle-moving-review-thread",
+    branch: "takt/sam-20-handle-moving-review-thread",
     title: "SAM-20: Handle moving review thread",
     state: "open",
     checks_status: "success",
@@ -1907,7 +1907,7 @@ function staleRecoveredReviewFeedbackInspection(): PullRequestInspection {
   return {
     number: 32,
     url: "https://github.test/acme/widgets/pull/32",
-    branch: "symphony/sam-32-recovered-stale-feedback",
+    branch: "takt/sam-32-recovered-stale-feedback",
     title: "SAM-32: Recovered stale feedback",
     state: "open",
     checks_status: "success",
@@ -1968,7 +1968,7 @@ function approvedInspection(): PullRequestInspection {
   return {
     number: 16,
     url: "https://github.test/acme/widgets/pull/16",
-    branch: "symphony/sam-16-merge-approved-pr",
+    branch: "takt/sam-16-merge-approved-pr",
     title: "SAM-16: Merge approved PR",
     state: "open",
     checks_status: "success",
@@ -1997,7 +1997,7 @@ function healthyInspection(): PullRequestInspection {
   return {
     number: 11,
     url: "https://github.test/acme/widgets/pull/11",
-    branch: "symphony/sam-11-recovered-pr-should-not-redispatch",
+    branch: "takt/sam-11-recovered-pr-should-not-redispatch",
     title: "SAM-11: Recovered PR should not redispatch",
     state: "open",
     checks_status: "success",
@@ -2017,7 +2017,7 @@ function discoveredPullRequest(): DiscoveredPullRequest {
   return {
     number: 11,
     url: "https://github.test/acme/widgets/pull/11",
-    branch: "symphony/sam-11-recovered-pr-should-not-redispatch",
+    branch: "takt/sam-11-recovered-pr-should-not-redispatch",
     title: "SAM-11: Recovered PR should not redispatch",
     created: false,
     issue_identifier: "SAM-11"
@@ -2037,7 +2037,7 @@ function recoveredPrRecord(issueId: string, identifier: string): IssueDebugRecor
       github_pull_request: {
         number: 32,
         url: "https://github.test/acme/widgets/pull/32",
-        branch: "symphony/sam-32-recovered-stale-feedback",
+        branch: "takt/sam-32-recovered-stale-feedback",
         title: "SAM-32: Recovered stale feedback",
         created: false
       }
@@ -2049,7 +2049,7 @@ function mergedDiscoveredPullRequest(): DiscoveredPullRequest {
   return {
     number: 22,
     url: "https://github.test/acme/widgets/pull/22",
-    branch: "symphony/sam-22-merged-while-offline",
+    branch: "takt/sam-22-merged-while-offline",
     title: "SAM-22: Merged while offline",
     created: false,
     issue_identifier: "SAM-22"
@@ -2060,7 +2060,7 @@ function mergedInspection(): PullRequestInspection {
   return {
     number: 22,
     url: "https://github.test/acme/widgets/pull/22",
-    branch: "symphony/sam-22-merged-while-offline",
+    branch: "takt/sam-22-merged-while-offline",
     title: "SAM-22: Merged while offline",
     state: "merged",
     checks_status: "success",
@@ -2110,7 +2110,7 @@ function durableSnapshot(dueAtMs: number): DurableStateSnapshot {
           github_pull_request: {
             number: 12,
             url: "https://github.test/acme/widgets/pull/12",
-            branch: "symphony/sam-12-durable-retry",
+            branch: "takt/sam-12-durable-retry",
             title: "SAM-12: Durable retry",
             created: true
           }
@@ -2132,9 +2132,9 @@ function githubDisabled(): SymphonyConfig["github"] {
     token: null,
     remote: "origin",
     base_branch: "main",
-    branch_prefix: "symphony",
-    pr_ready_file: "SYMPHONY_PR_READY.json",
-    evidence_file: "SYMPHONY_EVIDENCE.json",
+    branch_prefix: "takt",
+    pr_ready_file: "TAKT_PR_READY.json",
+    evidence_file: "TAKT_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };

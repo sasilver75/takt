@@ -14,9 +14,9 @@ import { WorkspaceManager } from "../workspace/manager.js";
 
 const execFileAsync = promisify(execFile);
 
-describe("Symphony webapp production-factory harness", () => {
+describe("Takt webapp production-factory harness", () => {
   test("drives a frontend/backend TypeScript app change through workspace, fake Codex, tracker tool, verification, and handoff", async () => {
-    const temp = await mkdtemp(path.join(os.tmpdir(), "symphony-factory-"));
+    const temp = await mkdtemp(path.join(os.tmpdir(), "takt-factory-"));
     const fakeCodexPath = path.join(temp, "scripted-codex.mjs");
     await writeFile(fakeCodexPath, scriptedCodexServerSource());
     await chmod(fakeCodexPath, 0o755);
@@ -73,7 +73,7 @@ describe("Symphony webapp production-factory harness", () => {
     const workspace = workspaceManager.workspacePath("WEB-1");
     await waitFor(async () => (await readFile(path.join(workspace, ".after-run"), "utf8")).includes("after"), "after_run hook");
 
-    expect(await readFile(path.join(workspace, ".mcp-argv"), "utf8")).toContain("mcp_servers.symphony_linear.url");
+    expect(await readFile(path.join(workspace, ".mcp-argv"), "utf8")).toContain("mcp_servers.takt_linear.url");
     expect(await readFile(path.join(workspace, ".mcp-env"), "utf8")).toBe("WEB-1");
     const mcpArgv = await readFile(path.join(workspace, ".mcp-argv"), "utf8");
     expect(mcpArgv).not.toContain("test-capability-token");
@@ -83,7 +83,7 @@ describe("Symphony webapp production-factory harness", () => {
     expect(await readFile(path.join(workspace, ".mcp-elicitation"), "utf8")).toContain('"action":"accept"');
     const baseInstructions = await readFile(path.join(workspace, ".base-instructions"), "utf8");
     expect(baseInstructions).toContain("linear_graphql");
-    expect(baseInstructions).toContain("Symphony harness internals");
+    expect(baseInstructions).toContain("Takt runtime internals");
     expect(await readFile(path.join(workspace, ".before-run"), "utf8")).toContain("before");
     expect(await readFile(path.join(workspace, "src", "health.ts"), "utf8")).toContain("getHealth");
     expect(await readFile(path.join(workspace, "src", "server.ts"), "utf8")).toContain("/api/health");
@@ -168,7 +168,7 @@ function config(temp: string, workspaceRoot: string, command: string, toySource:
       turn_timeout_ms: 5000,
       read_timeout_ms: 1000,
       stall_timeout_ms: 5000,
-      linear_graphql_mcp: { enabled: true, server_name: "symphony_linear" }
+      linear_graphql_mcp: { enabled: true, server_name: "takt_linear" }
     },
     observability: { recent_event_limit: 200, issue_event_limit: 50, run_attempt_limit: 50 },
     server: { port: null, host: "127.0.0.1" }
@@ -184,9 +184,9 @@ function githubDisabled(): SymphonyConfig["github"] {
     token: null,
     remote: "origin",
     base_branch: "main",
-    branch_prefix: "symphony",
-    pr_ready_file: "SYMPHONY_PR_READY.json",
-    evidence_file: "SYMPHONY_EVIDENCE.json",
+    branch_prefix: "takt",
+    pr_ready_file: "TAKT_PR_READY.json",
+    evidence_file: "TAKT_EVIDENCE.json",
     draft: false,
     merge: githubMergeDisabled()
   };
@@ -296,7 +296,7 @@ rl.on("line", (line) => {
   if (msg.method === "initialize") {
     const argv = process.argv.join("\\n");
     writeFileSync(path.join(process.cwd(), ".mcp-argv"), argv);
-    writeFileSync(path.join(process.cwd(), ".mcp-env"), process.env.SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER || "");
+    writeFileSync(path.join(process.cwd(), ".mcp-env"), process.env.TAKT_LINEAR_CURRENT_ISSUE_IDENTIFIER || "");
     send({ id: msg.id, result: { userAgent: "scripted-codex", codexHome: process.cwd(), platformFamily: "unix", platformOs: "test" } });
     return;
   }
@@ -310,7 +310,7 @@ rl.on("line", (line) => {
     send({ id: msg.id, result: { turn: { id: "turn-web-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
     send({ method: "turn/started", params: { threadId: "thread-web", turn: { id: "turn-web-1", items: [], itemsView: "all", status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
     send({ id: "approval-1", method: "item/commandExecution/requestApproval", params: { threadId: "thread-web" } });
-    send({ id: "mcp-approval-1", method: "mcpServer/elicitation/request", params: { threadId: "thread-web", turnId: "turn-web-1", serverName: "symphony_linear", mode: "form", message: "Allow linear_graphql", requestedSchema: { type: "object", properties: {} }, _meta: null } });
+    send({ id: "mcp-approval-1", method: "mcpServer/elicitation/request", params: { threadId: "thread-web", turnId: "turn-web-1", serverName: "takt_linear", mode: "form", message: "Allow linear_graphql", requestedSchema: { type: "object", properties: {} }, _meta: null } });
     send({ method: "item/completed", params: { threadId: "thread-web", turnId: "turn-web-1", item: { id: "leak-check", output: "bridge test-capability-token" } } });
     send({ id: "tool-1", method: "item/tool/call", params: { threadId: "thread-web", tool: "linear_graphql", arguments: { query: "mutation UpdateIssue($id: ID!, $state: String!) { issueUpdate(id: $id, input: { state: $state }) { success } }", variables: { id: "toy-issue-1", state: "Human Review" } } } });
   }

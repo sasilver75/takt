@@ -160,7 +160,7 @@ function renderDashboard(snapshot: unknown): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Symphony Status</title>
+  <title>Takt Status</title>
   <style>
     body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f7f7f4;color:#1e2528}
     header{background:#172026;color:#fff;padding:24px 32px}
@@ -174,7 +174,7 @@ function renderDashboard(snapshot: unknown): string {
   </style>
 </head>
 <body>
-  <header><h1>Symphony Status</h1></header>
+  <header><h1>Takt Status</h1></header>
   <main>
     <div class="metrics">
       <div class="metric"><div>Running</div><div class="value">${state.counts?.running ?? 0}</div></div>
@@ -218,7 +218,7 @@ function renderIssuePage(snapshot: unknown): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Symphony Issue ${escapeHtml(issue.issue_identifier ?? "")}</title>
+  <title>Takt Issue ${escapeHtml(issue.issue_identifier ?? "")}</title>
   <style>
     body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f7f7f4;color:#1e2528}
     header{background:#172026;color:#fff;padding:24px 32px}

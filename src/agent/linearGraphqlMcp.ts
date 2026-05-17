@@ -1,7 +1,7 @@
 import type { Issue, SymphonyConfig } from "../domain.js";
 
 const SECRET_ENV_KEY = /(^|[_-])(token|secret|password|authorization|credential|pat)($|[_-])|api[_-]?key/i;
-const MCP_BEARER_ENV_VAR = "SYMPHONY_LINEAR_MCP_TOKEN";
+const MCP_BEARER_ENV_VAR = "TAKT_LINEAR_MCP_TOKEN";
 
 export type LinearGraphqlMcpBridgeConfig = {
   url: string;
@@ -21,9 +21,9 @@ export async function prepareLinearGraphqlMcp(
   bridge: LinearGraphqlMcpBridgeConfig | null
 ): Promise<LinearMcpLaunch> {
   const env = sanitizedCodexEnv(process.env, config, {
-    SYMPHONY_LINEAR_PROJECT_SLUG: config.tracker.project_slug ?? "",
-    SYMPHONY_LINEAR_CURRENT_ISSUE_ID: issue?.id ?? "",
-    SYMPHONY_LINEAR_CURRENT_ISSUE_IDENTIFIER: issue?.identifier ?? ""
+    TAKT_LINEAR_PROJECT_SLUG: config.tracker.project_slug ?? "",
+    TAKT_LINEAR_CURRENT_ISSUE_ID: issue?.id ?? "",
+    TAKT_LINEAR_CURRENT_ISSUE_IDENTIFIER: issue?.identifier ?? ""
   });
   if (!config.codex.linear_graphql_mcp.enabled || !bridge) {
     return { command: config.codex.command, env, configuredUrl: null };

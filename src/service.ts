@@ -89,7 +89,7 @@ export class SymphonyService {
   }
 
   getOrchestrator(): Orchestrator {
-    if (!this.orchestrator) throw new Error("Symphony service has not started");
+    if (!this.orchestrator) throw new Error("Takt service has not started");
     return this.orchestrator;
   }
 }

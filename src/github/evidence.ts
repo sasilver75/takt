@@ -8,7 +8,7 @@ import type { Logger } from "../observability/logger.js";
 import { GitHubApiClient, type FetchLike } from "./client.js";
 import { localEvidenceArtifactScan, normalizeEvidenceArtifactPath } from "./evidenceArtifacts.js";
 
-export const SYMPHONY_EVIDENCE_COMMENT_MARKER = "<!-- symphony:evidence -->";
+export const TAKT_EVIDENCE_COMMENT_MARKER = "<!-- takt:evidence -->";
 const execFileAsync = promisify(execFile);
 const MAX_EVIDENCE_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -75,7 +75,7 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
         const content = await readFile(artifactFile.sourcePath);
         const sha = await this.findExistingContentSha(artifactFile.repositoryPath, pullRequest.branch);
         await this.api.request("PUT", `/repos/${config.owner}/${config.repo}/contents/${contentRoutePath(artifactFile.repositoryPath)}`, {
-          message: `Add Symphony evidence artifact ${artifactFile.repositoryPath}`,
+          message: `Add Takt evidence artifact ${artifactFile.repositoryPath}`,
           content: content.toString("base64"),
           branch: pullRequest.branch,
           ...(sha ? { sha } : {})
@@ -113,7 +113,7 @@ export class GitHubPullRequestEvidencePublisher implements PullRequestEvidencePu
       const record = comment as Record<string, unknown>;
       const body = readString(record.body);
       const id = typeof record.id === "number" && Number.isFinite(record.id) ? record.id : null;
-      if (body?.includes(SYMPHONY_EVIDENCE_COMMENT_MARKER) && id) return id;
+      if (body?.includes(TAKT_EVIDENCE_COMMENT_MARKER) && id) return id;
     }
     return null;
   }
@@ -147,8 +147,8 @@ export function renderEvidenceComment(
   artifactWarnings: string[] = []
 ): string {
   const lines = [
-    SYMPHONY_EVIDENCE_COMMENT_MARKER,
-    "## Symphony Worker Evidence",
+    TAKT_EVIDENCE_COMMENT_MARKER,
+    "## Takt Worker Evidence",
     "",
     manifest.summary?.trim() || "Worker evidence was provided for this PR update.",
     "",

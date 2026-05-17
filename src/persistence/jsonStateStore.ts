@@ -38,7 +38,7 @@ export class JsonDurableStateStore implements DurableStateStore {
   }
 
   filePath(): string {
-    return path.join(path.resolve(this.getConfig().workspace.root), ".symphony", "state.json");
+    return path.join(path.resolve(this.getConfig().workspace.root), ".takt", "state.json");
   }
 }
 
