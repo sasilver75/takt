@@ -4,10 +4,14 @@
 
 ```bash
 docker build -f docker/codex-worker.Dockerfile -t takt-codex-worker:latest .
+docker build -f docker/codex-worker-go.Dockerfile -t takt-codex-worker-go:latest .
+LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm dev validate ./WORKFLOW.md
 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm dev ./WORKFLOW.md --port 8787
 ```
 
 The positional argument selects the workflow file. If omitted, Takt uses `./WORKFLOW.md`.
+
+`validate` and `doctor` are aliases for a non-mutating target-readiness check. They parse and resolve the workflow, verify required env vars, render a sample prompt, check target metadata, inspect Linear/GitHub/runtime coherence, verify local Docker image presence when `runtime.kind: docker`, and report host-runtime caveats for iOS/macOS-style workflows.
 
 `--port` enables the optional HTTP status surface and overrides `server.port` from workflow front matter. The server binds loopback by default.
 
@@ -20,6 +24,24 @@ The positional argument selects the workflow file. If omitted, Takt uses `./WORK
 The service watches `WORKFLOW.md` and reloads config and prompt content without restart. Reloaded settings apply to future dispatch, retries, hooks, reconciliation, and agent launches. In-flight Codex sessions are not restarted just because config changed.
 
 If reload fails, Takt logs `workflow reload failed` and keeps using the last known good config.
+
+## Target Contracts
+
+Each Takt instance should be configured for one target application or repository. The reusable boundary is the workflow contract, not a stack-specific orchestrator branch.
+
+Use the optional `target` front matter section to describe the application for humans and prompts:
+
+```yaml
+target:
+  name: Acme API
+  kind: go-service
+  repository: github.com/acme/api
+  verification:
+    - go test ./...
+  handoff: GitHub PR for human review
+```
+
+Takt exposes this data to Liquid prompts as `target` and includes it in Codex base instructions. It does not interpret `target.kind`; runtime behavior still comes from `runtime`, `hooks`, worker images, the prompt body, and repo-local instructions. See `docs/WORKFLOW_CONTRACT.md` and `examples/workflows/` for reusable templates.
 
 ## Durable State
 
@@ -85,7 +107,7 @@ When the HTTP extension is enabled:
 
 - `GET /` returns a human-readable dashboard.
 - `GET /issues/<issue_identifier>` returns a human-readable issue drill-down with workspace, attempts, PR lifecycle, evidence, errors, and recent issue events.
-- `GET /api/v1/state` returns running sessions, retry queue, published PR status, token/runtime totals, and rate limits.
+- `GET /api/v1/state` returns target metadata, running sessions, retry queue, published PR status, token/runtime totals, and rate limits.
 - `GET /api/v1/<issue_identifier>` returns issue-specific debug state, including the bounded per-issue worker run-attempt ledger.
 - `GET /api/v1/<issue_identifier>/artifacts` lists local evidence artifacts declared by the issue's evidence manifest and includes local artifact scan warnings such as directory truncation.
 - `GET /artifacts/<issue_identifier>/<artifact_path>` serves local evidence files for paths declared by the evidence manifest under `artifacts/`. Paths outside that durable artifact root are rejected; served files include restrictive content security headers.
@@ -132,6 +154,7 @@ Before production use:
 
 ## Verification Commands
 
+- `pnpm dev validate ./WORKFLOW.md`: runs the non-mutating target-readiness validator.
 - `pnpm typecheck`: typechecks the Takt service.
 - `pnpm test`: runs unit and deterministic integration tests.
 - `pnpm test:factory`: runs only the toy web-app production-factory harness.

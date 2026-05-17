@@ -82,6 +82,8 @@ describe("Takt webapp production-factory harness", () => {
     expect(await readFile(path.join(workspace, ".mcp-script"), "utf8").catch(() => "")).toBe("");
     expect(await readFile(path.join(workspace, ".mcp-elicitation"), "utf8")).toContain('"action":"accept"');
     const baseInstructions = await readFile(path.join(workspace, ".base-instructions"), "utf8");
+    expect(baseInstructions).toContain("Target application contract");
+    expect(baseInstructions).toContain("name=Toy Webapp");
     expect(baseInstructions).toContain("linear_graphql");
     expect(baseInstructions).toContain("Takt runtime internals");
     expect(await readFile(path.join(workspace, ".before-run"), "utf8")).toContain("before");
@@ -133,6 +135,16 @@ function config(temp: string, workspaceRoot: string, command: string, toySource:
   return {
     workflowPath: path.join(temp, "WORKFLOW.md"),
     workflowDir: temp,
+    target: {
+      name: "Toy Webapp",
+      kind: "typescript-web",
+      repository: "local://examples/toy-webapp",
+      description: "Frontend/backend TypeScript fixture used to exercise Takt as a production factory.",
+      instructions: ["Change backend and frontend together when the issue requires a full-stack affordance."],
+      verification: ["tsc -p tsconfig.json"],
+      evidence: ["Compile output is enough for this deterministic harness."],
+      handoff: "Human Review"
+    },
     tracker: {
       kind: "linear",
       endpoint: "local://tracker",

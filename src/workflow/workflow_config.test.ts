@@ -66,6 +66,16 @@ describe("workflow loader and config", () => {
     expect(config.agent.max_concurrent_agents_by_state).toEqual({ todo: 2 });
     expect(config.codex.command).toBe("codex app-server --flag");
     expect(config.observability).toEqual({ recent_event_limit: 123, issue_event_limit: 17, run_attempt_limit: 9 });
+    expect(config.target).toEqual({
+      name: null,
+      kind: null,
+      repository: null,
+      description: null,
+      instructions: [],
+      verification: [],
+      evidence: [],
+      handoff: null
+    });
     expect(config.runtime).toMatchObject({
       kind: "docker",
       docker: {
@@ -91,6 +101,74 @@ describe("workflow loader and config", () => {
     await expect(renderIssuePrompt({ ...workflow, prompt_template: "{{ missing.value }}" }, issue(), null)).rejects.toMatchObject({
       code: "template_render_error"
     });
+  });
+
+  test("target metadata is typed and available to workflow prompts", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-workflow-target-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(
+      workflowPath,
+      [
+        "---",
+        "target:",
+        "  name: Acme API",
+        "  kind: go-service",
+        "  repository: github.com/acme/api",
+        "  description: Handles public API traffic.",
+        "  instructions:",
+        "    - Prefer Makefile commands.",
+        "  verification:",
+        "    - go test ./...",
+        "  evidence:",
+        "    - Include API health output when changed.",
+        "  handoff: GitHub PR for review",
+        "tracker:",
+        "  api_key: $TOKEN",
+        "  project_slug: demo",
+        "---",
+        "Target {{ target.name }} kind={{ target.kind }} check={{ target.verification | first }}"
+      ].join("\n")
+    );
+    const workflow = await loadWorkflow(workflowPath);
+    const config = resolveConfig(workflow, { TOKEN: "secret" });
+
+    expect(config.target).toMatchObject({
+      name: "Acme API",
+      kind: "go-service",
+      repository: "github.com/acme/api",
+      verification: ["go test ./..."],
+      handoff: "GitHub PR for review"
+    });
+    await expect(renderIssuePrompt(workflow, issue(), null, null, config.target)).resolves.toContain("Target Acme API kind=go-service check=go test ./...");
+  });
+
+  test("target metadata rejects malformed contract fields", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-workflow-target-"));
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(workflowPath, "---\ntarget:\n  verification: go test ./...\n---\nbody");
+    const workflow = await loadWorkflow(workflowPath);
+
+    expect(() => resolveConfig(workflow)).toThrow(/target.verification must be a list of strings/);
+  });
+
+  test("reusable workflow examples parse as target contracts", async () => {
+    const examples = [
+      "examples/workflows/typescript-web.WORKFLOW.md",
+      "examples/workflows/go-service.WORKFLOW.md",
+      "examples/workflows/ios-host.WORKFLOW.md"
+    ];
+
+    for (const examplePath of examples) {
+      const workflow = await loadWorkflow(path.resolve(examplePath));
+      const config = resolveConfig(workflow, {
+        LINEAR_API_KEY: "linear-secret",
+        GITHUB_TOKEN: "github-secret"
+      });
+      expect(config.target?.name).toBeTruthy();
+      expect(config.target?.verification.length).toBeGreaterThan(0);
+      expect(config.github.enabled).toBe(true);
+      expect(() => validateDispatchConfig(config)).not.toThrow();
+    }
   });
 
   test("runtime reload keeps last good config after invalid change", async () => {

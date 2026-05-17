@@ -113,6 +113,7 @@ function writeJson(response: ServerResponse, status: number, body: unknown): voi
 
 function renderDashboard(snapshot: unknown): string {
   const state = snapshot as {
+    target?: { name?: string | null; kind?: string | null; repository?: string | null; handoff?: string | null } | null;
     counts?: { running?: number; retrying?: number; completed?: number; pull_requests?: number };
     codex_totals?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; seconds_running?: number };
     running?: Array<{ issue_identifier: string; state: string; last_event: string | null; turn_count: number }>;
@@ -155,6 +156,7 @@ function renderDashboard(snapshot: unknown): string {
         `<tr><td>${escapeHtml(row.at)}</td><td>${escapeHtml(row.event)}</td><td>${row.issue_identifier ? issueDrilldownLink(row.issue_identifier) : ""}</td><td>${escapeHtml(row.session_id ?? "")}</td><td>${escapeHtml(row.message ?? "")}</td></tr>`
     )
     .join("");
+  const targetSummary = renderTargetSummary(state.target ?? null);
   return `<!doctype html>
 <html>
 <head>
@@ -174,7 +176,7 @@ function renderDashboard(snapshot: unknown): string {
   </style>
 </head>
 <body>
-  <header><h1>Takt Status</h1></header>
+  <header><h1>Takt Status</h1>${targetSummary}</header>
   <main>
     <div class="metrics">
       <div class="metric"><div>Running</div><div class="value">${state.counts?.running ?? 0}</div></div>
@@ -191,6 +193,17 @@ function renderDashboard(snapshot: unknown): string {
   </main>
 </body>
 </html>`;
+}
+
+function renderTargetSummary(target: { name?: string | null; kind?: string | null; repository?: string | null; handoff?: string | null } | null): string {
+  if (!target?.name && !target?.kind && !target?.repository && !target?.handoff) return "";
+  const parts = [
+    target.name ? escapeHtml(target.name) : "",
+    target.kind ? escapeHtml(target.kind) : "",
+    target.repository ? `<code>${escapeHtml(target.repository)}</code>` : "",
+    target.handoff ? `handoff: ${escapeHtml(target.handoff)}` : ""
+  ].filter(Boolean);
+  return `<p>${parts.join(" / ")}</p>`;
 }
 
 function issueDrilldownLink(identifier: string): string {

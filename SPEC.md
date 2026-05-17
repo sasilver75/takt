@@ -329,6 +329,7 @@ Returned workflow object:
 
 Top-level keys:
 
+- `target`
 - `tracker`
 - `polling`
 - `workspace`
@@ -345,7 +346,30 @@ Note:
 - Extensions SHOULD document their field schema, defaults, validation rules, and whether changes
   apply dynamically or require restart.
 
-#### 5.3.1 `tracker` (object)
+#### 5.3.1 `target` (object, OPTIONAL)
+
+`target` describes the application/repository a workflow instance is configured to operate on. It
+is descriptive target-contract metadata for prompts, operators, and examples. The core scheduler
+MUST NOT branch on stack names such as `typescript-web`, `go-service`, or `ios-host`; stack-specific
+behavior belongs in hooks, worker images, prompt instructions, and repository-local docs.
+
+Fields:
+
+- `name` (string, OPTIONAL)
+- `kind` (string, OPTIONAL)
+  - Human-readable stack/profile label only.
+- `repository` (string, OPTIONAL)
+- `description` (string, OPTIONAL)
+- `instructions` (list of strings, OPTIONAL)
+- `verification` (list of strings, OPTIONAL)
+- `evidence` (list of strings, OPTIONAL)
+- `handoff` (string, OPTIONAL)
+
+Implementations MAY expose `target` as prompt context and MAY include it in coding-agent base
+instructions. Malformed target metadata SHOULD fail configuration validation because it is part of
+the repository-owned workflow contract.
+
+#### 5.3.2 `tracker` (object)
 
 Fields:
 
@@ -365,7 +389,7 @@ Fields:
 - `terminal_states` (list of strings)
   - Default: `Closed`, `Cancelled`, `Canceled`, `Duplicate`, `Done`
 
-#### 5.3.2 `polling` (object)
+#### 5.3.3 `polling` (object)
 
 Fields:
 
@@ -373,7 +397,7 @@ Fields:
   - Default: `30000`
   - Changes SHOULD be re-applied at runtime and affect future tick scheduling without restart.
 
-#### 5.3.3 `workspace` (object)
+#### 5.3.4 `workspace` (object)
 
 Fields:
 
@@ -383,7 +407,7 @@ Fields:
   - Relative paths are resolved relative to the directory containing `WORKFLOW.md`.
   - The effective workspace root is normalized to an absolute path before use.
 
-#### 5.3.4 `hooks` (object)
+#### 5.3.5 `hooks` (object)
 
 Fields:
 
@@ -407,7 +431,7 @@ Fields:
   - Invalid values fail configuration validation.
   - Changes SHOULD be re-applied at runtime for future hook executions.
 
-#### 5.3.5 `agent` (object)
+#### 5.3.6 `agent` (object)
 
 Fields:
 
@@ -426,7 +450,7 @@ Fields:
   - State keys are normalized (`lowercase`) for lookup.
   - Invalid entries (non-positive or non-numeric) are ignored.
 
-#### 5.3.6 `codex` (object)
+#### 5.3.7 `codex` (object)
 
 Fields:
 
@@ -473,6 +497,11 @@ Template input variables:
 - `attempt` (integer or null)
   - `null`/absent on first attempt.
   - Integer on retry or continuation run.
+- `target` (object)
+  - Includes the optional target-contract metadata from `target` front matter with default empty
+    strings/nulls and empty lists for omitted fields.
+- `followup_context` (string or null)
+  - Contains PR/check/review follow-up context when the orchestrator is requeueing an existing PR.
 
 Fallback prompt behavior:
 
@@ -573,6 +602,14 @@ Extension fields are documented in the extension section that defines them. Core
 not require recognizing or validating extension fields unless that extension is implemented.
 
 - `tracker.kind`: string, REQUIRED, currently `linear`
+- `target.name`: string, OPTIONAL
+- `target.kind`: string, OPTIONAL descriptive profile label; not scheduler logic
+- `target.repository`: string, OPTIONAL
+- `target.description`: string, OPTIONAL
+- `target.instructions`: list of strings, default `[]`
+- `target.verification`: list of strings, default `[]`
+- `target.evidence`: list of strings, default `[]`
+- `target.handoff`: string, OPTIONAL
 - `tracker.endpoint`: string, default `https://api.linear.app/graphql` when `tracker.kind=linear`
 - `tracker.api_key`: string or `$VAR`, canonical env `LINEAR_API_KEY` when `tracker.kind=linear`
 - `tracker.project_slug`: string, REQUIRED when `tracker.kind=linear`
@@ -1239,7 +1276,9 @@ Inputs to prompt rendering:
 
 - `workflow.prompt_template`
 - normalized `issue` object
+- normalized `target` object
 - OPTIONAL `attempt` integer (retry/continuation metadata)
+- OPTIONAL `followup_context` string
 
 ### 12.2 Rendering Rules
 
@@ -1247,6 +1286,8 @@ Inputs to prompt rendering:
 - Render with strict filter checking.
 - Convert issue object keys to strings for template compatibility.
 - Preserve nested arrays/maps (labels, blockers) so templates can iterate.
+- Preserve target string lists (`instructions`, `verification`, `evidence`) so templates can render
+  stack-specific expectations without adding scheduler branching.
 
 ### 12.3 Retry/Continuation Semantics
 
@@ -1420,6 +1461,12 @@ Minimum endpoints:
     ```json
     {
       "generated_at": "2026-02-24T20:15:30Z",
+      "target": {
+        "name": "Acme API",
+        "kind": "go-service",
+        "repository": "github.com/acme/api",
+        "handoff": "GitHub PR for human review"
+      },
       "counts": {
         "running": 2,
         "retrying": 1
@@ -1545,6 +1592,27 @@ API design notes:
 - API errors SHOULD use a JSON envelope such as `{"error":{"code":"...","message":"..."}}`.
 - If the dashboard is a client-side app, it SHOULD consume this API rather than duplicating state
   logic.
+
+### 13.8 OPTIONAL Target Readiness Validator
+
+Implementations MAY provide a non-mutating `validate` or `doctor` command for onboarding a new
+target workflow. If shipped, it SHOULD check:
+
+- workflow file loading and YAML/front matter parsing
+- typed config resolution and dispatch preflight validation
+- required `$VAR` environment references
+- target metadata usefulness (`target.name`, `target.kind`, `target.repository`, verification, and
+  handoff)
+- Linear and GitHub config coherence
+- runtime plausibility and local Docker image presence for Docker workers
+- host-runtime caveats for iOS/macOS/Xcode-style workflows
+- workspace hook presence for repository bootstrap and reused-workspace sync
+- sample prompt rendering with `issue`, `attempt`, `target`, and `followup_context`
+- PR-ready and evidence manifest filename validity
+
+The validator MUST NOT fetch candidate issues, mutate Linear, push Git branches, create/update PRs,
+launch Codex workers, or run arbitrary workflow hooks. It is a readiness surface, not a dry run of
+the production loop.
 
 ## 14. Failure Model and Recovery Strategy
 
@@ -1980,9 +2048,11 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - `tracker.api_key` works (including `$VAR` indirection)
 - `$VAR` resolution works for tracker API key and path values
 - `~` path expansion works
+- Optional `target` metadata is typed, defaults missing fields, and rejects malformed list fields
 - `codex.command` is preserved as a shell command string
 - Per-state concurrency override map normalizes state names and ignores invalid values
 - Prompt template renders `issue` and `attempt`
+- Prompt template renders `target`
 - Prompt rendering fails on unknown variables (strict mode)
 
 ### 17.2 Workspace Manager and Safety
@@ -2081,6 +2151,8 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - CLI accepts a positional workflow path argument (`path-to-WORKFLOW.md`)
 - CLI uses `./WORKFLOW.md` when no workflow path argument is provided
 - CLI errors on nonexistent explicit workflow path or missing default `./WORKFLOW.md`
+- If a target readiness validator is implemented, CLI exposes `validate` or `doctor`, reports
+  actionable errors/warnings, and exits nonzero when readiness errors are present
 - CLI surfaces startup failure cleanly
 - CLI exits with success when application starts and shuts down normally
 - CLI exits nonzero when startup fails or the host process exits abnormally
@@ -2111,6 +2183,8 @@ Use the same validation profiles as Section 17:
 - Workflow path selection supports explicit runtime path and cwd default
 - `WORKFLOW.md` loader with YAML front matter + prompt body split
 - Typed config layer with defaults and `$` resolution
+- Optional target-application metadata contract exposed to prompt rendering without stack-specific
+  scheduler branching
 - Dynamic `WORKFLOW.md` watch/reload/re-apply for config and prompt
 - Polling orchestrator with single-authority mutable state
 - Issue tracker client with candidate fetch + state refresh + terminal fetch
@@ -2161,6 +2235,8 @@ Use the same validation profiles as Section 17:
   review, non-draft PR state, and clean mergeability unless explicitly relaxed by workflow config.
 - Observability settings MAY be configurable in workflow front matter without prescribing UI
   implementation details.
+- Target readiness validator MAY provide a non-mutating `validate`/`doctor` command that reports
+  workflow/config/env/runtime/hook/prompt readiness before a new target workflow dispatches work.
 - TODO: Add pluggable issue tracker adapters beyond Linear.
 
 ### 18.3 Operational Validation Before Production (RECOMMENDED)

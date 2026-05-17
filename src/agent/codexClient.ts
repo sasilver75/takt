@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { SymphonyConfig, CodexRuntimeEvent, GraphqlToolExecutor, Issue } from "../domain.js";
+import type { SymphonyConfig, CodexRuntimeEvent, GraphqlToolExecutor, Issue, TargetConfig } from "../domain.js";
 import { SymphonyError, errorMessage } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import type { WorkerRuntimeLease } from "../runtime/workerRuntime.js";
@@ -71,13 +71,14 @@ export class CodexAppServerClient {
       ephemeral: false,
       baseInstructions: [
         "You are running under Takt, an automated software production runtime.",
+        targetBaseInstruction(this.options.config.target),
         this.options.config.codex.linear_graphql_mcp.enabled
           ? `Use the linear_graphql tool from the ${this.options.config.codex.linear_graphql_mcp.server_name} MCP server for Linear reads. Do not use other Linear integrations, do not use raw Linear credentials from disk, and do not inspect Takt runtime internals.`
           : "Use only workflow-approved tools for issue context, never read raw tracker credentials from disk, and do not inspect Takt runtime internals.",
         this.options.config.github.enabled
           ? `When implementation work is ready for PR review, commit all code changes and write ${this.options.config.github.pr_ready_file} in the workspace root as JSON with title, summary, verification, and risk fields. If you ran an app or captured reviewer evidence, also write ${this.options.config.github.evidence_file} with summary, verification, app_urls, artifacts, and notes. Do not create the GitHub PR yourself and do not move the issue to review; Takt will publish the PR, evidence, and tracker updates.`
           : "Follow the workflow prompt for handoff."
-      ].join("\n")
+      ].filter(Boolean).join("\n")
     })) as JsonObject;
     const thread = result.thread as JsonObject | undefined;
     const threadId = typeof thread?.id === "string" ? thread.id : null;
@@ -304,6 +305,23 @@ export class CodexAppServerClient {
       (value): value is string => typeof value === "string" && value.length > 8
     );
   }
+}
+
+function targetBaseInstruction(target: TargetConfig | undefined): string | null {
+  if (!target) return null;
+  const details = [
+    target.name ? `name=${target.name}` : "",
+    target.kind ? `kind=${target.kind}` : "",
+    target.repository ? `repository=${target.repository}` : "",
+    target.handoff ? `handoff=${target.handoff}` : ""
+  ].filter(Boolean);
+  if (details.length === 0 && !target.description && target.verification.length === 0 && target.instructions.length === 0) return null;
+  const lines = [`Target application contract: ${details.length > 0 ? details.join(" ") : "configured in WORKFLOW.md"}.`];
+  if (target.description) lines.push(`Target description: ${target.description}`);
+  if (target.instructions.length > 0) lines.push(`Target instructions: ${target.instructions.join("; ")}`);
+  if (target.verification.length > 0) lines.push(`Target verification expectations: ${target.verification.join("; ")}`);
+  if (target.evidence.length > 0) lines.push(`Target evidence expectations: ${target.evidence.join("; ")}`);
+  return lines.join("\n");
 }
 
 function extractUsage(value: unknown): { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null {

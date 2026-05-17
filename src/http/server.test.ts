@@ -18,6 +18,7 @@ describe("HTTP status server", () => {
     const orchestrator = {
       snapshot: () => ({
         generated_at: "2026-01-01T00:00:00.000Z",
+        target: { name: "Acme Widgets", kind: "typescript-web", repository: "github.com/acme/widgets", handoff: "GitHub PR for review" },
         counts: { running: 1, retrying: 0, completed: 0, pull_requests: 1 },
         running: [{ issue_identifier: "ABC-1", state: "In Progress", turn_count: 2, last_event: "turn/started" }],
         retrying: [],
@@ -117,6 +118,8 @@ describe("HTTP status server", () => {
     const base = `http://${address.host}:${address.port}`;
     const dashboard = await (await fetch(`${base}/`)).text();
     expect(dashboard).toContain("Takt Status");
+    expect(dashboard).toContain("Acme Widgets");
+    expect(dashboard).toContain("typescript-web");
     expect(dashboard).toContain("Recent Events");
     expect(dashboard).toContain("/issues/ABC-1");
     expect(dashboard).toContain("evidence (1 artifact, 1 app URL, 1 check, 1 command, 1 warning)");

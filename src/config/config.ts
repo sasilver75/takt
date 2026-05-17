@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import type { SymphonyConfig, WorkflowDefinition } from "../domain.js";
+import type { SymphonyConfig, TargetConfig, WorkflowDefinition } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 
 const DEFAULT_ACTIVE_STATES = ["Todo", "In Progress"];
@@ -14,6 +14,7 @@ export function resolveConfig(
   overrides: { port?: number | null } = {}
 ): SymphonyConfig {
   const root = workflow.config;
+  const target = optionalObjectAt(root, "target");
   const tracker = objectAt(root, "tracker");
   const github = objectAt(root, "github");
   const githubMerge = objectAt(github, "merge");
@@ -33,6 +34,7 @@ export function resolveConfig(
   return {
     workflowPath: workflow.path,
     workflowDir,
+    target: targetConfigAt(target),
     tracker: {
       kind: trackerKind === "linear" ? "linear" : (trackerKind as "linear"),
       endpoint: stringAt(tracker, "endpoint") ?? "https://api.linear.app/graphql",
@@ -165,6 +167,13 @@ function objectAt(root: Record<string, unknown>, key: string): Record<string, un
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+function optionalObjectAt(root: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = root[key];
+  if (value === undefined || value === null) return null;
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  throw new SymphonyError("invalid_config_value", `${key} must be an object`);
+}
+
 function valueAt(root: Record<string, unknown>, key: string): unknown {
   return root[key];
 }
@@ -199,6 +208,35 @@ function stringListAt(root: Record<string, unknown>, key: string, fallback: stri
   if (!Array.isArray(value)) return [...fallback];
   const values = value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
   return values.length > 0 ? values : [...fallback];
+}
+
+function optionalStringListAt(root: Record<string, unknown> | null, key: string): string[] {
+  if (!root || root[key] === undefined || root[key] === null) return [];
+  const value = root[key];
+  if (!Array.isArray(value)) throw new SymphonyError("invalid_config_value", `target.${key} must be a list of strings`);
+  const values = value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  if (values.length !== value.length) throw new SymphonyError("invalid_config_value", `target.${key} must be a list of strings`);
+  return values;
+}
+
+function targetStringAt(root: Record<string, unknown> | null, key: string): string | null {
+  if (!root || root[key] === undefined || root[key] === null) return null;
+  const value = root[key];
+  if (typeof value !== "string") throw new SymphonyError("invalid_config_value", `target.${key} must be a string`);
+  return emptyToNull(value);
+}
+
+function targetConfigAt(root: Record<string, unknown> | null): TargetConfig {
+  return {
+    name: targetStringAt(root, "name"),
+    kind: targetStringAt(root, "kind"),
+    repository: targetStringAt(root, "repository"),
+    description: targetStringAt(root, "description"),
+    instructions: optionalStringListAt(root, "instructions"),
+    verification: optionalStringListAt(root, "verification"),
+    evidence: optionalStringListAt(root, "evidence"),
+    handoff: targetStringAt(root, "handoff")
+  };
 }
 
 function integerAt(root: Record<string, unknown>, key: string, fallback: number): number {

@@ -13,11 +13,21 @@ pnpm build
 pnpm verify
 pnpm integration:live
 docker build -f docker/codex-worker.Dockerfile -t takt-codex-worker:latest .
+docker build -f docker/codex-worker-go.Dockerfile -t takt-codex-worker-go:latest .
+pnpm dev validate ./examples/WORKFLOW.md
 pnpm dev ./examples/WORKFLOW.md --reconcile-once
 pnpm dev ./examples/WORKFLOW.md --port 0
 ```
 
 Production workflows should keep secrets in environment variables and refer to them from `WORKFLOW.md`, for example `api_key: $LINEAR_API_KEY`. The service validates that credentials exist without printing them.
+
+## Target Application Contract
+
+Takt is reusable across applications by changing the workflow contract, not by teaching the orchestrator every stack. A single Takt instance is expected to target one application/repository at a time; Linear, GitHub, Codex app-server, Docker or host runtimes, and Chromium remain the fixed delivery-loop assumptions.
+
+`WORKFLOW.md` front matter now supports an optional `target` section with descriptive metadata such as `name`, `kind`, `repository`, `instructions`, `verification`, `evidence`, and `handoff`. Takt exposes that data to the worker prompt as `target`, while hooks, worker images, and repo-local docs remain responsible for stack-specific setup. See [docs/WORKFLOW_CONTRACT.md](./docs/WORKFLOW_CONTRACT.md) and templates under [examples/workflows](./examples/workflows).
+
+Run `takt validate ./WORKFLOW.md` or `takt doctor ./WORKFLOW.md` before starting a new target. The validator is non-mutating and checks config, required environment variables, target metadata, Linear/GitHub coherence, runtime/image readiness, hooks, and sample prompt rendering.
 
 ## Main Pieces
 

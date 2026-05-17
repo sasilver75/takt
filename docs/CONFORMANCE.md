@@ -9,6 +9,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Workflow path selection and default `./WORKFLOW.md` | `src/workflow/loader.ts`, `src/cli.ts` | `src/workflow/workflow_config.test.ts` |
 | YAML front matter and prompt-body split | `src/workflow/loader.ts` | `src/workflow/workflow_config.test.ts` |
 | Typed config defaults, `$VAR` resolution, path expansion | `src/config/config.ts` | `src/workflow/workflow_config.test.ts` |
+| Target application metadata contract exposed to prompts without stack-specific scheduler branching | `src/config/config.ts`, `src/workflow/prompt.ts`, `src/agent/codexClient.ts`, `docs/WORKFLOW_CONTRACT.md`, `examples/workflows/*` | `src/workflow/workflow_config.test.ts` |
 | Dynamic workflow watch/reload with last-good config | `src/workflow/runtime.ts`, `src/orchestrator/orchestrator.ts` | `src/workflow/workflow_config.test.ts` |
 | Single-authority polling orchestrator state, completed bookkeeping, and explicit PR-handoff dispatch suppression | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
 | Linear candidate fetch, terminal fetch, state refresh | `src/tracker/linear.ts` | `src/tracker/linear.test.ts` |
@@ -35,12 +36,14 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Worker evidence manifest validation, separated verification/check command metadata, bounded artifact auto-publishing with visible truncation warnings, sticky PR evidence comment with inline image previews, persisted artifact warnings, dashboard/API evidence summary, and local artifact browsing with scan warnings | `src/github/evidence.ts`, `src/github/evidenceArtifacts.ts`, `src/orchestrator/orchestrator.ts`, `src/http/server.ts` | `src/github/evidence.test.ts`, `src/github/publisher.test.ts`, `src/orchestrator/orchestrator.test.ts`, `src/http/server.test.ts`, live PRs `#3`, `#4`, `#5`, and `#6` |
 | Policy-gated GitHub merge extension | `src/github/merger.ts`, `src/orchestrator/orchestrator.ts` | `src/github/merger.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Docker-first worker runtime with baseline Chromium screenshot capability | `src/runtime/workerRuntime.ts`, `docker/codex-worker.Dockerfile`, `docker/takt-capture-url`, `docs/OPERATIONS.md` | `src/runtime/workerRuntime.test.ts`, `src/runtime/dockerImage.test.ts`, live `SAM-71` run |
+| Target readiness validator / doctor command | `src/validation/doctor.ts`, `src/cli.ts`, `docs/WORKFLOW_CONTRACT.md`, `examples/workflows/README.md` | `src/validation/doctor.test.ts`, `src/cli.test.ts` |
 | PR follow-up from checks/comments/current-head reviews/current-head threads, with stale-head suppression on recovered PRs | `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts`, live PR `#3` |
 | Skip-visible real integration profile | `src/integration/liveProfile.ts`, `package.json`, `docs/OPERATIONS.md` | `src/integration/liveProfile.test.ts`; `pnpm integration:live` reports `SKIP` unless explicitly enabled |
 
 ## Operational Validation
 
 - Local deterministic gate: `pnpm verify`.
+- Target onboarding gate: `LINEAR_API_KEY=... GITHUB_TOKEN=... takt validate ./WORKFLOW.md`.
 - App-shaped factory harness: `pnpm test:factory`.
 - Non-mutating live readiness profile: `pnpm integration:live`, explicitly enabled with `TAKT_LIVE_INTEGRATION=1`.
 - Live Linear/Codex/Docker history: `docs/OPERATIONS.md`.
@@ -48,6 +51,10 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 
 ## Known Gaps And Watch Items
 
+- `IMPLEMENTED`: One-application target contracts are represented by typed `target` workflow metadata, reusable workflow templates, and the non-mutating `validate`/`doctor` command.
+- `IMPLEMENTED`: TypeScript/web and Go worker image profiles are documented; the default image covers Node/Chromium and `docker/codex-worker-go.Dockerfile` adds Go tooling.
+- `ACCEPTED GAP`: The readiness validator checks local Docker image presence and config coherence but intentionally avoids live Linear/GitHub/API calls; `pnpm integration:live` remains the non-mutating live readiness profile.
+- `INTENTIONALLY DEFERRED`: Generic tracker/SCM adapters remain out of scope for the current product direction. Linear and GitHub stay fixed assumptions.
 - Mutating full-loop real integration checks are operator-run, not automatic CI gates, because they touch Linear/GitHub and require live credentials. A non-mutating readiness profile exists and reports skipped status unless explicitly enabled.
 - The HTTP dashboard is functional and state-backed, including per-issue drill-down pages, bounded worker run-attempt history, and local browsing for evidence-manifest artifacts under `artifacts/`; external artifact retention and cross-run analytics remain product work.
 - Workers can attach durable artifacts through committed files, or by listing small workspace-contained files/directories under `artifacts/` in the evidence manifest so Takt uploads them to the PR branch. The evidence manifest distinguishes successful verification checks from supporting launch/capture/export commands, but large binary artifact retention, external object storage, video capture conventions, and trace viewers are not yet first-class orchestration features.

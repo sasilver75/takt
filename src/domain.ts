@@ -26,9 +26,21 @@ export type WorkflowDefinition = {
   loaded_at: string;
 };
 
+export type TargetConfig = {
+  name: string | null;
+  kind: string | null;
+  repository: string | null;
+  description: string | null;
+  instructions: string[];
+  verification: string[];
+  evidence: string[];
+  handoff: string | null;
+};
+
 export type SymphonyConfig = {
   workflowPath: string;
   workflowDir: string;
+  target?: TargetConfig;
   tracker: {
     kind: "linear";
     endpoint: string;

@@ -89,7 +89,7 @@ export class AgentRunHandle {
       for (;;) {
         const prompt =
           turnNumber === 1
-            ? await renderIssuePrompt(this.options.getWorkflow(), issue, this.options.attempt, this.options.followupContext ?? null)
+            ? await renderIssuePrompt(this.options.getWorkflow(), issue, this.options.attempt, this.options.followupContext ?? null, config.target)
             : continuationPrompt(turnNumber, this.options.getConfig().agent.max_turns);
         await client.runTurn(prompt);
         if (await isPrReady(workspace.path, this.options.getConfig())) break;

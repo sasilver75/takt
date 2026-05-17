@@ -5,9 +5,11 @@ Takt is split into layers that mirror `SPEC.md` and keep the service legible to 
 ## Layer Map
 
 - Workflow and policy: `src/workflow/*`
-  - Loads `WORKFLOW.md`, parses optional YAML front matter, watches for changes, and renders strict prompts.
+  - Loads `WORKFLOW.md`, parses optional YAML front matter, watches for changes, and renders strict prompts with issue, attempt, follow-up, and target metadata.
 - Typed configuration: `src/config/config.ts`
   - Applies defaults, resolves `$VAR` only where explicitly configured, expands workspace paths, and validates dispatch preflight.
+- Target readiness validation: `src/validation/doctor.ts`
+  - Runs non-mutating workflow onboarding checks for config, env vars, target metadata, GitHub/Linear coherence, runtime/image readiness, hooks, and sample prompt rendering.
 - Tracker integration: `src/tracker/linear.ts`
   - Implements Linear candidate fetch, terminal-state fetch, state refresh, state transitions, comments, normalization, pagination, and the `linear_graphql` extension backend.
 - PR publishing: `src/github/publisher.ts`
@@ -46,6 +48,7 @@ Takt is split into layers that mirror `SPEC.md` and keep the service legible to 
 - Issue identifiers are sanitized before they become directory names.
 - Secrets are accepted through config/env resolution but never logged.
 - `WORKFLOW.md` changes are reloaded without restart; invalid reloads keep the last known good config.
+- `target` workflow metadata is descriptive target-application context. It is exposed to prompts/base instructions, but the orchestrator does not branch on stack names such as web, Go, or iOS.
 
 ## Agent-First Harness Principles
 

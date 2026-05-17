@@ -1,4 +1,20 @@
 ---
+target:
+  name: Takt
+  kind: typescript-service
+  repository: github.com/sasilver75/takt
+  description: TypeScript software-factory runtime for Codex-powered implementation workers.
+  instructions:
+    - Keep Linear, GitHub, Codex app-server, Docker or host runtimes, and Chromium as fixed harness assumptions.
+    - Keep stack-specific behavior in WORKFLOW.md, worker images, hooks, and repository-local docs.
+  verification:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm test:factory
+    - pnpm build
+  evidence:
+    - Include PR-ready summary, focused verification, and screenshots or artifacts when a runnable surface changed.
+  handoff: GitHub PR moved to Needs Human in Linear
 tracker:
   kind: linear
   api_key: $LINEAR_API_KEY

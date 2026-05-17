@@ -196,6 +196,7 @@ export class Orchestrator {
     const activeSeconds = [...this.state.running.values()].reduce((sum, entry) => sum + (now - entry.started_at_ms) / 1000, 0);
     return {
       generated_at: new Date(now).toISOString(),
+      target: config.target ?? null,
       counts: { running: running.length, retrying: retrying.length, completed: this.state.completed.size, pull_requests: pullRequests.length },
       running,
       retrying,

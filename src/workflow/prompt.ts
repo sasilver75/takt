@@ -1,14 +1,25 @@
 import { Liquid } from "liquidjs";
-import type { Issue, WorkflowDefinition } from "../domain.js";
+import type { Issue, TargetConfig, WorkflowDefinition } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 
 const DEFAULT_PROMPT = "You are working on an issue from Linear.";
+const DEFAULT_TARGET: TargetConfig = {
+  name: null,
+  kind: null,
+  repository: null,
+  description: null,
+  instructions: [],
+  verification: [],
+  evidence: [],
+  handoff: null
+};
 
 export async function renderIssuePrompt(
   workflow: WorkflowDefinition,
   issue: Issue,
   attempt: number | null,
-  followupContext: string | null = null
+  followupContext: string | null = null,
+  target: TargetConfig = DEFAULT_TARGET
 ): Promise<string> {
   const engine = new Liquid({
     strictVariables: true,
@@ -19,6 +30,7 @@ export async function renderIssuePrompt(
     const rendered = await engine.parseAndRender(template, {
       issue: JSON.parse(JSON.stringify(issue)) as Issue,
       attempt,
+      target: JSON.parse(JSON.stringify(target)) as TargetConfig,
       followup_context: followupContext
     });
     return appendFollowupContext(rendered, followupContext);

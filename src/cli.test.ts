@@ -8,13 +8,17 @@ import { parseCliArgs, runCli, startCli, type CliService } from "./cli.js";
 describe("CLI", () => {
   test("parses positional workflow path and port override", () => {
     expect(parseCliArgs(["./examples/WORKFLOW.md", "--port", "8787"])).toEqual({
+      command: "serve",
       workflowPath: "./examples/WORKFLOW.md",
       port: 8787,
       reconcileOnce: false
     });
-    expect(parseCliArgs(["--port=0"])).toEqual({ workflowPath: null, port: 0, reconcileOnce: false });
-    expect(parseCliArgs(["--reconcile-once"])).toEqual({ workflowPath: null, port: null, reconcileOnce: true });
+    expect(parseCliArgs(["--port=0"])).toEqual({ command: "serve", workflowPath: null, port: 0, reconcileOnce: false });
+    expect(parseCliArgs(["--reconcile-once"])).toEqual({ command: "serve", workflowPath: null, port: null, reconcileOnce: true });
+    expect(parseCliArgs(["validate", "./WORKFLOW.md"])).toEqual({ command: "validate", workflowPath: "./WORKFLOW.md", port: null, reconcileOnce: false });
+    expect(parseCliArgs(["doctor"])).toEqual({ command: "validate", workflowPath: null, port: null, reconcileOnce: false });
     expect(() => parseCliArgs(["--port", "nope"])).toThrow("--port requires a non-negative integer");
+    expect(() => parseCliArgs(["validate", "--port", "0"])).toThrow("validate does not support --port");
     expect(() => parseCliArgs(["--unknown"])).toThrow("Unknown option: --unknown");
     expect(() => parseCliArgs(["one.md", "two.md"])).toThrow("Unexpected positional argument: two.md");
   });
@@ -110,6 +114,58 @@ describe("CLI", () => {
 
     expect(code).toBe(1);
     expect(stderr.join("")).toContain("takt startup failed: config exploded");
+  });
+
+  test("validate command reports workflow readiness without starting service", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "takt-cli-validate-"));
+    await writeFile(
+      path.join(dir, "WORKFLOW.md"),
+      [
+        "---",
+        "target:",
+        "  name: Acme API",
+        "  kind: go-service",
+        "  repository: github.com/acme/api",
+        "  verification:",
+        "    - go test ./...",
+        "  handoff: GitHub PR for review",
+        "tracker:",
+        "  api_key: $LINEAR_API_KEY",
+        "  project_slug: demo",
+        "  claim_state: In Progress",
+        "  review_state: Needs Human",
+        "  active_states:",
+        "    - Ready",
+        "    - In Progress",
+        "github:",
+        "  enabled: true",
+        "  owner: acme",
+        "  repo: api",
+        "  token: $GITHUB_TOKEN",
+        "runtime:",
+        "  kind: host",
+        "hooks:",
+        "  after_create: git clone https://github.com/acme/api.git .",
+        "  before_run: git fetch origin main && git rebase origin/main",
+        "---",
+        "Work on {{ issue.identifier }} for {{ target.name }}."
+      ].join("\n")
+    );
+    const stdout: string[] = [];
+    const code = await runCli({
+      argv: ["validate"],
+      cwd: dir,
+      env: { LINEAR_API_KEY: "linear-secret", GITHUB_TOKEN: "github-secret" },
+      serviceFactory: () => {
+        throw new Error("validate should not start the service");
+      },
+      stdout: writeSink(stdout)
+    });
+
+    expect(code).toBe(0);
+    expect(stdout.join("")).toContain("Takt workflow validation:");
+    expect(stdout.join("")).toContain("[OK] workflow:");
+    expect(stdout.join("")).toContain("Summary: 0 error(s)");
   });
 });
 
