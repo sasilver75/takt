@@ -10,6 +10,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | YAML front matter and prompt-body split | `src/workflow/loader.ts` | `src/workflow/workflow_config.test.ts` |
 | Typed config defaults, `$VAR` resolution, path expansion | `src/config/config.ts` | `src/workflow/workflow_config.test.ts` |
 | Target application metadata contract exposed to prompts without stack-specific scheduler branching | `src/config/config.ts`, `src/workflow/prompt.ts`, `src/agent/codexClient.ts`, `docs/WORKFLOW_CONTRACT.md`, `examples/workflows/*` | `src/workflow/workflow_config.test.ts` |
+| Scenario matrix distinguishes workflow-only templates from runnable regression fixtures | `examples/README.md`, `examples/workflows/README.md`, `docs/WORKFLOW_CONTRACT.md`, `examples/toy-webapp`, `examples/toy-go-service`, `examples/toy-node-cli` | `src/workflow/workflow_config.test.ts`, `src/harness/toyWebappFactory.test.ts`, `src/harness/runnableFixtures.test.ts` |
 | Dynamic workflow watch/reload with last-good config | `src/workflow/runtime.ts`, `src/orchestrator/orchestrator.ts` | `src/workflow/workflow_config.test.ts` |
 | Single-authority polling orchestrator state, completed bookkeeping, and explicit PR-handoff dispatch suppression | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
 | Linear candidate fetch, terminal fetch, state refresh | `src/tracker/linear.ts` | `src/tracker/linear.test.ts` |
@@ -44,7 +45,8 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 
 - Local deterministic gate: `pnpm verify`.
 - Target onboarding gate: `LINEAR_API_KEY=... GITHUB_TOKEN=... takt validate ./WORKFLOW.md`.
-- App-shaped factory harness: `pnpm test:factory`.
+- App-shaped factory harness: `pnpm test:fixtures`.
+- Standalone toy fixture checks: `pnpm toy:go:test`, `pnpm toy:cli:test`, and `pnpm toy:typecheck`.
 - Non-mutating live readiness profile: `pnpm integration:live`, explicitly enabled with `TAKT_LIVE_INTEGRATION=1`.
 - Live Linear/Codex/Docker history: `docs/OPERATIONS.md`.
 - Latest live PR loop evidence: PR `#6`, sticky evidence comment `#issuecomment-4468480674`.
@@ -52,7 +54,9 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 ## Known Gaps And Watch Items
 
 - `IMPLEMENTED`: One-application target contracts are represented by typed `target` workflow metadata, reusable workflow templates, and the non-mutating `validate`/`doctor` command.
-- `IMPLEMENTED`: TypeScript/web and Go worker image profiles are documented; the default image covers Node/Chromium and `docker/codex-worker-go.Dockerfile` adds Go tooling.
+- `IMPLEMENTED`: Workflow templates are parsed as copy/customize contracts, while `toy-webapp`, `toy-go-service`, and `toy-node-cli` are runnable regression fixtures driven through the scripted Codex app-server harness.
+- `IMPLEMENTED`: TypeScript/web, Go service, and no-server Node CLI profiles are documented; the default image covers Node/Chromium and `docker/codex-worker-go.Dockerfile` adds Go tooling.
+- `INTENTIONALLY DEFERRED`: Additional scenario overlays for malformed evidence manifests, hook failure, validator failures, and richer evidence publishing should be added over time on top of the current fixture matrix rather than by adding more app stacks first.
 - `ACCEPTED GAP`: The readiness validator checks local Docker image presence and config coherence but intentionally avoids live Linear/GitHub/API calls; `pnpm integration:live` remains the non-mutating live readiness profile.
 - `INTENTIONALLY DEFERRED`: Generic tracker/SCM adapters remain out of scope for the current product direction. Linear and GitHub stay fixed assumptions.
 - Mutating full-loop real integration checks are operator-run, not automatic CI gates, because they touch Linear/GitHub and require live credentials. A non-mutating readiness profile exists and reports skipped status unless explicitly enabled.

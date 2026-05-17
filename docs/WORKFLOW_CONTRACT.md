@@ -55,9 +55,20 @@ Takt exposes the `target` section to prompts and base instructions, but the orch
 
 - TypeScript web app: Docker worker with Node, pnpm install in `before_run`, Playwright or app-specific tests in the prompt, Chromium evidence when UI changes.
 - Go service: Docker worker with Go tooling, `go mod download` in `before_run`, `go test ./...` as primary verification.
+- Node CLI/library: Docker worker with Node tooling, package install only when needed, `node --test` or the repo script as primary verification.
 - iOS/macOS project: host runtime on macOS with Xcode installed, Xcode package resolution in `before_run`, `xcodebuild test` as verification.
 
 The examples under `examples/workflows/` are templates. They are not meant to run without replacing repository, Linear project, and GitHub owner/repo values.
+
+The runnable directories under `examples/` have a different purpose: they are durable regression fixtures for app-shaped orchestration behavior. Harness tests copy those fixtures into isolated workspaces, run the scripted Codex app-server path, make a stack-appropriate change, execute the fixture verification command, and assert Takt status, handoff, hook, and logging behavior. The current matrix is intentionally small:
+
+| Fixture | Template | Verification |
+| --- | --- | --- |
+| `examples/toy-webapp` | `examples/workflows/typescript-web.WORKFLOW.md` | `tsc -p tsconfig.json` |
+| `examples/toy-go-service` | `examples/workflows/go-service.WORKFLOW.md` | `go test ./...` |
+| `examples/toy-node-cli` | `examples/workflows/node-cli.WORKFLOW.md` | `node --test` |
+
+Scenario overlays should grow before the fixture zoo does. Use the existing runnable fixtures to cover continuation/retry, evidence manifests, malformed manifests, hook failure, and validator failures over time.
 
 ## Onboarding Flow
 

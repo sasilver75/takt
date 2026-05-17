@@ -2157,7 +2157,20 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - CLI exits with success when application starts and shuts down normally
 - CLI exits nonzero when startup fails or the host process exits abnormally
 
-### 17.8 Real Integration Profile (RECOMMENDED)
+### 17.8 Example Scenario Coverage (IMPLEMENTATION PRACTICE)
+
+Example assets SHOULD be separated by purpose:
+
+- workflow templates are copy/customize examples whose contracts are parsed and validated
+- runnable toy applications are regression fixtures for app-shaped orchestration behavior
+- scenario overlays SHOULD cover continuation/retry, evidence manifests, malformed manifests, hook
+  failure, and validator failures over time
+
+The Takt implementation currently treats the TypeScript web app, Go HTTP service, and no-server
+Node CLI fixtures as the small runnable matrix. Additional stacks are intentionally deferred unless
+they exercise materially different orchestration behavior.
+
+### 17.9 Real Integration Profile (RECOMMENDED)
 
 These checks are RECOMMENDED for production readiness and MAY be skipped in CI when credentials,
 network access, or external service permissions are unavailable.

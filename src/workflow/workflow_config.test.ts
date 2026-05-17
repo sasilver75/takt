@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -152,14 +152,14 @@ describe("workflow loader and config", () => {
   });
 
   test("reusable workflow examples parse as target contracts", async () => {
-    const examples = [
-      "examples/workflows/typescript-web.WORKFLOW.md",
-      "examples/workflows/go-service.WORKFLOW.md",
-      "examples/workflows/ios-host.WORKFLOW.md"
-    ];
+    const examplesDir = path.resolve("examples/workflows");
+    const examples = (await readdir(examplesDir))
+      .filter((entry) => entry.endsWith(".WORKFLOW.md"))
+      .map((entry) => path.join(examplesDir, entry))
+      .sort();
 
     for (const examplePath of examples) {
-      const workflow = await loadWorkflow(path.resolve(examplePath));
+      const workflow = await loadWorkflow(examplePath);
       const config = resolveConfig(workflow, {
         LINEAR_API_KEY: "linear-secret",
         GITHUB_TOKEN: "github-secret"
