@@ -39,7 +39,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | Docker-first worker runtime with baseline Chromium screenshot capability | `src/runtime/workerRuntime.ts`, `docker/codex-worker.Dockerfile`, `docker/takt-capture-url`, `docs/OPERATIONS.md` | `src/runtime/workerRuntime.test.ts`, `src/runtime/dockerImage.test.ts`, live `SAM-71` run |
 | Target readiness validator / doctor command | `src/validation/doctor.ts`, `src/cli.ts`, `docs/WORKFLOW_CONTRACT.md`, `examples/workflows/README.md` | `src/validation/doctor.test.ts`, `src/cli.test.ts` |
 | PR follow-up from checks/comments/current-head reviews/current-head threads, with stale-head suppression on recovered PRs | `src/github/tracker.ts`, `src/orchestrator/orchestrator.ts` | `src/github/tracker.test.ts`, `src/orchestrator/orchestrator.test.ts`, live PR `#3` |
-| Skip-visible real integration profile and gated mutating publication-ledger canary | `src/integration/liveProfile.ts`, `src/integration/livePublicationCanary.ts`, `package.json`, `docs/OPERATIONS.md` | `src/integration/liveProfile.test.ts`; `pnpm integration:live` reports `SKIP` unless explicitly enabled; live `SAM-91` / PR `#7` publication canary |
+| Skip-visible real integration profile and gated mutating publication-ledger canary matrix | `src/integration/liveProfile.ts`, `src/integration/livePublicationCanary.ts`, `package.json`, `docs/OPERATIONS.md` | `src/integration/liveProfile.test.ts`, `src/integration/livePublicationCanary.test.ts`; `pnpm integration:live` reports `SKIP` unless explicitly enabled; live `SAM-101`-`SAM-107` / PR `#17`-`#23` publication canary matrix |
 
 ## Operational Validation
 
