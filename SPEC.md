@@ -2147,6 +2147,8 @@ Use the same validation profiles as Section 17:
 - Worker evidence extension lets workers write an implementation-defined evidence manifest that the
   orchestrator publishes back to the PR without exposing GitHub credentials to workers. Malformed
   evidence manifests SHOULD fail visibly instead of being silently treated as absent evidence.
+  Screenshot/image artifacts SHOULD be easy for reviewers to inspect directly from the PR surface
+  when the target review system supports inline previews.
   Implementations SHOULD distinguish completed verification assertions from supporting evidence
   commands such as dev-server launch, screenshot capture, log export, or trace collection. When
   represented in the manifest, supporting commands SHOULD carry command text plus optional

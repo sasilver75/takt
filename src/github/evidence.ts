@@ -223,7 +223,9 @@ function renderArtifact(pullRequest: PublishedPullRequest, artifact: EvidenceArt
   const target = artifact.url?.trim() || normalizedPath || "";
   const description = artifact.description?.trim();
   const renderedTarget = artifact.url?.trim() ? target : renderArtifactPathTarget(pullRequest, target, repository);
-  return `${label}: ${renderedTarget}${description ? ` - ${singleLine(description)}` : ""}`;
+  const previewUrl = imagePreviewUrl(pullRequest, artifact, normalizedPath, repository);
+  const preview = previewUrl ? `\n  ![${escapeMarkdownText(singleLine(`${label}: ${target}`))}](${previewUrl})` : "";
+  return `${label}: ${renderedTarget}${description ? ` - ${singleLine(description)}` : ""}${preview}`;
 }
 
 function renderArtifactPathTarget(pullRequest: PublishedPullRequest, normalizedPath: string, repository?: { owner: string | null; repo: string | null }): string {
@@ -243,12 +245,44 @@ function renderEvidenceCommand(command: NonNullable<EvidenceManifest["commands"]
 function artifactBlobUrl(pullRequest: PublishedPullRequest, normalizedPath: string, repository?: { owner: string | null; repo: string | null }): string | null {
   const repoUrl = repository?.owner && repository.repo ? repositoryWebUrlFromPullRequest(pullRequest, repository.owner, repository.repo) : null;
   if (!repoUrl) return null;
-  const branch = encodeURI(pullRequest.branch.trim());
-  const artifactPath = normalizedPath
+  return `${repoUrl}/blob/${branchPath(pullRequest.branch)}/${contentRoutePath(normalizedPath)}`;
+}
+
+function imagePreviewUrl(
+  pullRequest: PublishedPullRequest,
+  artifact: EvidenceArtifact,
+  normalizedPath: string | null,
+  repository?: { owner: string | null; repo: string | null }
+): string | null {
+  const externalUrl = artifact.url?.trim();
+  if (externalUrl) return isImageArtifact(artifact, externalUrl) ? externalUrl : null;
+  if (!normalizedPath || !isImageArtifact(artifact, normalizedPath)) return null;
+  const repoUrl = repository?.owner && repository.repo ? repositoryWebUrlFromPullRequest(pullRequest, repository.owner, repository.repo) : null;
+  if (!repoUrl) return null;
+  return `${repoUrl}/raw/${branchPath(pullRequest.branch)}/${contentRoutePath(normalizedPath)}`;
+}
+
+function isImageArtifact(artifact: EvidenceArtifact, target: string): boolean {
+  const kind = artifact.kind?.trim().toLowerCase();
+  if (kind && ["screenshot", "image", "photo"].includes(kind)) return true;
+  return [".png", ".jpg", ".jpeg", ".gif", ".webp"].includes(path.posix.extname(targetPathname(target)).toLowerCase());
+}
+
+function targetPathname(target: string): string {
+  try {
+    return new URL(target).pathname;
+  } catch {
+    return target;
+  }
+}
+
+function branchPath(branch: string): string {
+  return branch
+    .trim()
     .split("/")
+    .filter((segment) => segment.length > 0)
     .map((segment) => encodeURIComponent(segment))
     .join("/");
-  return `${repoUrl}/blob/${branch}/${artifactPath}`;
 }
 
 function repositoryWebUrlFromPullRequest(pullRequest: PublishedPullRequest, owner: string, repo: string): string | null {

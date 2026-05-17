@@ -48,6 +48,8 @@ describe("GitHub PR evidence publisher", () => {
     });
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("artifacts/SAM-9/home.png");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("https://github.test/acme/widgets/blob/symphony/sam-9/artifacts/SAM-9/home.png");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("![screenshot: artifacts/SAM-9/home.png](https://github.test/acme/widgets/raw/symphony/sam-9/artifacts/SAM-9/home.png)");
+    expect(String((requests[1]?.body as { body?: unknown }).body)).not.toContain("![trace:");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("npx playwright test");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("### Evidence Commands");
     expect(String((requests[1]?.body as { body?: unknown }).body)).toContain("server started: pnpm dev -- --host 127.0.0.1 - Launched the app for browser capture.");
