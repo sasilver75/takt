@@ -1043,7 +1043,6 @@ export class Orchestrator {
     const issue = candidates.find((candidate) => candidate.id === issueId);
     if (!issue) {
       this.state.claimed.delete(issueId);
-      this.state.completed.add(issueId);
       this.persistState();
       return;
     }

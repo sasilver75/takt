@@ -1352,6 +1352,51 @@ describe("orchestrator", () => {
     });
   });
 
+  test("releases retry claim for missing candidates without marking completed", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-retry-release-"));
+    const cfg = config(root, "node missing.js");
+    const retryIssueId = "retry-missing";
+    const durableStore: DurableStateStore = {
+      async load() {
+        return {
+          ...durableSnapshot(Date.now() - 1),
+          retry_attempts: [{ issue_id: retryIssueId, identifier: "SAM-31", attempt: 1, due_at_ms: Date.now() - 1, error: "moved out of active states", context: null }],
+          completed_issue_ids: [],
+          issue_history: [
+            {
+              issue_id: retryIssueId,
+              issue_identifier: "SAM-31",
+              workspace_path: null,
+              restart_count: 0,
+              last_error: "moved out of active states",
+              run_attempts: [],
+              recent_events: [],
+              tracked: {}
+            }
+          ]
+        };
+      },
+      async save() {}
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker: new FakeTracker([], [], []),
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      durableStore,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.start({ schedule: false });
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 0, "retry release for missing candidate");
+
+    expect(orchestrator.state.claimed.has(retryIssueId)).toBe(false);
+    expect(orchestrator.snapshot()).toMatchObject({ counts: { retrying: 0, completed: 0 } });
+    expect(orchestrator.issueSnapshot("SAM-31")).toMatchObject({ status: "known" });
+    await orchestrator.stop();
+  });
+
   test("requeues due retries when worker slots are exhausted", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-retry-slots-"));
     const serverPath = path.join(root, "fake-codex-long-running.mjs");

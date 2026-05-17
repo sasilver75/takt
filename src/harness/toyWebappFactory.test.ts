@@ -110,7 +110,7 @@ describe("Symphony webapp production-factory harness", () => {
       issue_identifier: "WEB-1",
       workspace: { path: workspace }
     });
-    expect(["retrying", "completed"]).toContain(issueSnapshot?.status);
+    expect(["retrying", "known"]).toContain(issueSnapshot?.status);
     expect(logs.some((line) => line.includes("approval_auto_approved"))).toBe(true);
     expect(logs.some((line) => line.includes("linear_graphql_tool_call"))).toBe(true);
     expect(logs.some((line) => line.includes("thread/tokenUsage/updated"))).toBe(true);
@@ -119,7 +119,7 @@ describe("Symphony webapp production-factory harness", () => {
     expect(logText).toContain("[redacted]");
 
     await waitFor(() => (orchestrator.snapshot() as Snapshot).counts.retrying === 0, "continuation retry release");
-    expect(orchestrator.issueSnapshot("WEB-1")).toMatchObject({ status: "completed" });
+    expect(orchestrator.issueSnapshot("WEB-1")).toMatchObject({ status: "known" });
     await orchestrator.stop();
   }, 15000);
 });
