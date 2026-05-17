@@ -2135,7 +2135,8 @@ Use the same validation profiles as Section 17:
   app-server session using configured Symphony auth.
 - First-class tracker-write extension lets the orchestrator move issues through claim, review, and
   completion states; publish PR links and follow-up briefs as tracker comments; and validate write
-  mutation success without exposing tracker credentials to workers.
+  mutation success without exposing tracker credentials to workers. PR-link tracker comments SHOULD
+  be idempotent across republishing the same PR.
 - Durable state extension persists retry queue, issue history, PR metadata, and session summaries
   across process restarts. Live worker processes are not required to survive restart.
 - GitHub PR lifecycle extension owns orchestrator-side PR publishing/reconciliation, including

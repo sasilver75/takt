@@ -789,9 +789,10 @@ export class Orchestrator {
       const evidenceManifest = await this.readEvidenceManifestForPublish(workspacePath, config.github.evidence_file);
       const published = await this.options.pullRequestPublisher.publish({ issue, workspacePath, manifest, evidenceManifest });
       const record = this.ensureRecord(issue);
+      const previousPullRequest = readTrackedPullRequest(record.tracked.github_pull_request);
       record.tracked.github_pull_request = published;
       await this.publishPullRequestEvidence(record, published, workspacePath);
-      await this.options.tracker.commentOnIssue?.(issue, `Published PR: ${published.url}`);
+      await this.commentPublishedPullRequestLink(record, issue, published, previousPullRequest);
       await this.ensureIssueReviewState(record, issue, "pull_request_publish", true);
       this.markPullRequestFollowupHandled(record);
       record.last_error = null;
@@ -815,6 +816,23 @@ export class Orchestrator {
       });
       return false;
     }
+  }
+
+  private async commentPublishedPullRequestLink(
+    record: IssueDebugRecord,
+    issue: Issue,
+    published: PublishedPullRequest,
+    previousPullRequest: PublishedPullRequest | null
+  ): Promise<void> {
+    if (!this.options.tracker.commentOnIssue) return;
+    const alreadyCommented =
+      record.tracked.github_pr_link_commented_number === published.number || record.tracked.github_pr_link_commented_url === published.url;
+    const unchangedExistingPr = previousPullRequest?.number === published.number && previousPullRequest.url === published.url && !published.created;
+    if (alreadyCommented || unchangedExistingPr) return;
+    await this.options.tracker.commentOnIssue(issue, `Published PR: ${published.url}`);
+    record.tracked.github_pr_link_commented_number = published.number;
+    record.tracked.github_pr_link_commented_url = published.url;
+    record.tracked.github_pr_link_commented_at = new Date().toISOString();
   }
 
   private async publishPullRequestEvidence(record: IssueDebugRecord, pullRequest: PublishedPullRequest, workspacePath: string): Promise<void> {

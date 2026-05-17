@@ -224,7 +224,11 @@ describe("orchestrator", () => {
           }
         ]
       },
-      tracked: { github_pull_request: { url: "https://github.test/acme/widgets/pull/9" } }
+      tracked: {
+        github_pull_request: { url: "https://github.test/acme/widgets/pull/9" },
+        github_pr_link_commented_number: 9,
+        github_pr_link_commented_url: "https://github.test/acme/widgets/pull/9"
+      }
     });
     await tracker.transitionIssue(activeIssue, "In Progress");
     await orchestrator.tick();
@@ -743,6 +747,7 @@ describe("orchestrator", () => {
 
     expect(tracker.getIssue("i-pr-followup")?.state).toBe("Needs Human");
     expect(tracker.comments.some((comment) => comment.body.includes("PR follow-up queued") && comment.body.includes("verify"))).toBe(true);
+    expect(tracker.comments.filter((comment) => comment.body.startsWith("Published PR:"))).toHaveLength(1);
     const promptLog = await readFile(path.join(manager.workspacePath("SAM-10"), "prompts.log"), "utf8");
     expect(promptLog).toContain("Orchestrator follow-up context");
     expect(promptLog).toContain("GitHub checks are failing");

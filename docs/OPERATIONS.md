@@ -61,7 +61,7 @@ When `github.enabled: true`, the issue-to-PR loop is:
 3. If useful, the worker writes `github.evidence_file` with reviewer evidence such as app URLs, successful verification checks, supporting command metadata, screenshots, traces, logs, or reports. Use the manifest `verification` list for checks that completed successfully and directly support the PR claim; use the optional `commands` list for supporting operations such as dev-server launch, screenshot capture, log export, or trace collection. Symphony renders repository-relative artifact paths as PR-branch links. Small local files or directories listed under `artifacts/` may be left uncommitted; Symphony allows those paths through the clean-workspace gate and uploads the discovered files to the PR branch before posting evidence. Other durable artifact files should be committed with the worker changes. Symphony adds artifact warnings when a listed path is missing, invalid, outside the workspace, too large to upload, or not available on the PR branch. A malformed evidence manifest blocks PR publication and leaves an operator-visible retry/error instead of being silently ignored.
 4. Symphony pushes a branch named from `github.branch_prefix` and the issue identifier/title.
 5. Symphony creates or updates a GitHub PR against `github.base_branch`.
-6. Symphony publishes evidence as a sticky PR conversation comment, comments the PR URL in Linear, and moves the issue to `tracker.review_state`.
+6. Symphony publishes evidence as a sticky PR conversation comment, comments each PR URL in Linear at most once, and moves the issue to `tracker.review_state`.
 
 After a PR is published, Symphony owns the PR lifecycle reconciliation loop:
 
