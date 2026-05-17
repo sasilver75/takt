@@ -1,6 +1,6 @@
 # Takt
 
-Takt is a TypeScript software factory runtime built from the Symphony specification in [SPEC.md](./SPEC.md). It polls Linear, creates one isolated workspace per issue, runs Codex app-server sessions inside those workspaces, and turns completed worker output into reviewable GitHub PRs.
+Takt is a TypeScript software factory runtime originating from the Symphony specification in [SPEC.md](./SPEC.md). It polls Linear, creates one isolated workspace per issue, runs Codex app-server sessions inside those workspaces, and turns completed worker output into reviewable GitHub PRs.
 
 ## Quick Start
 
