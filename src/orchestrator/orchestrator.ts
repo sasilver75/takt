@@ -286,7 +286,6 @@ export class Orchestrator {
     const restoredAt = new Date().toISOString();
     this.state.issue_history = new Map(snapshot.issue_history.map((record) => [record.issue_identifier, this.trimIssueRecord(this.markInterruptedAttempts(record, restoredAt), config)]));
     for (const retry of snapshot.retry_attempts) {
-      if (this.state.completed.has(retry.issue_id)) continue;
       const delay = Math.max(retry.due_at_ms - Date.now(), 0);
       this.state.retry_attempts.set(retry.issue_id, {
         ...retry,
@@ -625,9 +624,9 @@ export class Orchestrator {
 
   private shouldDispatch(issue: Issue): boolean {
     if (!issue.id || !issue.identifier || !issue.title || !issue.state) return false;
-    if (this.state.completed.has(issue.id)) return false;
     if (!isActiveState(issue.state, this.options.getConfig())) return false;
     if (isTerminalState(issue.state, this.options.getConfig())) return false;
+    if (this.hasTrackedPullRequestHandoff(issue)) return false;
     if (this.state.running.has(issue.id) || this.state.claimed.has(issue.id)) return false;
     if (this.availableGlobalSlots() <= 0) return false;
     if (this.availableStateSlots(issue.state) <= 0) return false;
@@ -1062,6 +1061,14 @@ export class Orchestrator {
     const ok = this.shouldDispatch(issue);
     if (wasClaimed) this.state.claimed.add(issue.id);
     return ok;
+  }
+
+  private hasTrackedPullRequestHandoff(issue: Issue): boolean {
+    const record = this.state.issue_history.get(issue.identifier);
+    if (!record || record.issue_id !== issue.id) return false;
+    if (!readTrackedPullRequest(record.tracked.github_pull_request)) return false;
+    if (readStringArray(record.tracked.github_pr_inflight_followup_keys).length > 0) return false;
+    return true;
   }
 
   private markPullRequestFollowupHandled(record: IssueDebugRecord): void {

@@ -78,6 +78,34 @@ describe("orchestrator", () => {
     await orchestrator.stop();
   });
 
+  test("does not use completed bookkeeping as a generic dispatch gate", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-completed-bookkeeping-"));
+    const serverPath = path.join(root, "fake-codex.mjs");
+    await writeFile(serverPath, fakeCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = config(root, `node ${serverPath}`);
+    const activeIssue = issue({ id: "i-completed-bookkeeping", identifier: "ABC-2", state: "Todo" });
+    const tracker = new FakeTracker([activeIssue], [], [issue({ id: activeIssue.id, identifier: activeIssue.identifier, state: "Human Review" })]);
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      logger: createLogger(() => undefined)
+    });
+    orchestrator.state.completed.add(activeIssue.id);
+
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "dispatch despite completed bookkeeping");
+
+    expect(orchestrator.issueSnapshot("ABC-2")).toMatchObject({
+      attempts: { run_attempts: [{ status: "succeeded", followup: false }] }
+    });
+    await orchestrator.stop();
+  });
+
   test("blocked Todo issue is not dispatched", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-"));
     const cfg = config(root, "node missing.js");

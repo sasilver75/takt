@@ -10,7 +10,7 @@ This map ties `SPEC.md` required and shipped-extension behavior to implementatio
 | YAML front matter and prompt-body split | `src/workflow/loader.ts` | `src/workflow/workflow_config.test.ts` |
 | Typed config defaults, `$VAR` resolution, path expansion | `src/config/config.ts` | `src/workflow/workflow_config.test.ts` |
 | Dynamic workflow watch/reload with last-good config | `src/workflow/runtime.ts`, `src/orchestrator/orchestrator.ts` | `src/workflow/workflow_config.test.ts` |
-| Single-authority polling orchestrator state | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
+| Single-authority polling orchestrator state, completed bookkeeping, and explicit PR-handoff dispatch suppression | `src/orchestrator/orchestrator.ts` | `src/orchestrator/orchestrator.test.ts` |
 | Linear candidate fetch, terminal fetch, state refresh | `src/tracker/linear.ts` | `src/tracker/linear.test.ts` |
 | Orchestrator-owned Linear state transitions and comments | `src/tracker/linear.ts`, `src/orchestrator/orchestrator.ts` | `src/tracker/linear.test.ts`, `src/orchestrator/orchestrator.test.ts` |
 | Sanitized, contained per-issue workspaces | `src/workspace/manager.ts` | `src/workspace/manager.test.ts` |
