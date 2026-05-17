@@ -6,6 +6,7 @@ import type {
   DiscoveredPullRequest,
   DurableStateSnapshot,
   DurableStateStore,
+  Issue,
   IssueDebugRecord,
   PullRequestInspection,
   PullRequestEvidencePublisher,
@@ -666,6 +667,253 @@ describe("orchestrator", () => {
         }
       ]
     });
+    await orchestrator.stop();
+  });
+
+  test("resumes a durable publication transaction after branch push before PR record", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-publication-resume-branch-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      tracker: {
+        ...config(root, "node missing.js").tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-publication-branch", identifier: "SAM-52", state: "In Progress", title: "Resume branch push" });
+    const workspacePath = path.join(cfg.workspace.root, activeIssue.identifier);
+    const tracker = new LocalTracker([activeIssue]);
+    const saved: DurableStateSnapshot[] = [];
+    const durableStore: DurableStateStore = {
+      async load() {
+        return durablePublicationSnapshot(
+          activeIssue,
+          publicationTransaction(activeIssue, workspacePath, {
+            status: "failed",
+            phase: "branch_pushed",
+            branch: "takt/sam-52-resume-branch-push",
+            branch_pushed_at: "2026-05-17T00:00:00.000Z",
+            last_error: "orchestrator stopped before PR create"
+          })
+        );
+      },
+      async save(snapshot) {
+        saved.push(snapshot);
+      }
+    };
+    const published: unknown[] = [];
+    const publisher: PullRequestPublisher = {
+      async publish(input) {
+        published.push(input);
+        await input.onCheckpoint?.({ phase: "pull_request_publish_started", branch: "takt/sam-52-resume-branch-push", operation: "create" });
+        const pullRequest = {
+          number: 52,
+          url: "https://github.test/acme/widgets/pull/52",
+          branch: "takt/sam-52-resume-branch-push",
+          title: "SAM-52: Resume branch push",
+          created: true
+        };
+        await input.onCheckpoint?.({ phase: "pull_request_published", branch: pullRequest.branch, operation: "create", pullRequest });
+        return pullRequest;
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      durableStore,
+      pullRequestPublisher: publisher,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.start({ schedule: false });
+    await orchestrator.reconcileOnce();
+
+    expect(published).toHaveLength(1);
+    expect(tracker.getIssue(activeIssue.id)?.state).toBe("Needs Human");
+    expect(tracker.comments).toEqual([{ issue_id: activeIssue.id, body: "Published PR: https://github.test/acme/widgets/pull/52" }]);
+    expect(orchestrator.issueSnapshot(activeIssue.identifier)).toMatchObject({
+      status: "completed",
+      tracked: {
+        github_pull_request: { number: 52 },
+        github_publication_transaction: { status: "completed", phase: "completed", pull_request: { number: 52 } }
+      }
+    });
+    expect(saved.at(-1)?.issue_history[0]?.tracked).toMatchObject({
+      github_publication_transaction: { status: "completed", phase: "completed" }
+    });
+    await orchestrator.stop();
+  });
+
+  test("repairs a recorded PR publication missing evidence, Linear comment, and review state", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-publication-repair-handoff-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      tracker: {
+        ...config(root, "node missing.js").tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-publication-handoff", identifier: "SAM-53", state: "In Progress", title: "Repair PR handoff" });
+    const workspacePath = path.join(cfg.workspace.root, activeIssue.identifier);
+    const pullRequest = {
+      number: 53,
+      url: "https://github.test/acme/widgets/pull/53",
+      branch: "takt/sam-53-repair-pr-handoff",
+      title: "SAM-53: Repair PR handoff",
+      created: true
+    };
+    const tracker = new LocalTracker([activeIssue]);
+    const durableStore: DurableStateStore = {
+      async load() {
+        return durablePublicationSnapshot(
+          activeIssue,
+          publicationTransaction(activeIssue, workspacePath, {
+            phase: "pull_request_recorded",
+            branch: pullRequest.branch,
+            pull_request: pullRequest,
+            evidence_manifest: { summary: "Evidence is ready.", verification: ["pnpm test"] }
+          }),
+          { github_pull_request: pullRequest }
+        );
+      },
+      async save() {}
+    };
+    const evidencePublished: unknown[] = [];
+    const evidencePublisher: PullRequestEvidencePublisher = {
+      async publish(input) {
+        evidencePublished.push(input);
+        return { comment_id: 5300, url: "https://github.test/acme/widgets/pull/53#issuecomment-5300", warnings: [] };
+      }
+    };
+    const publisher: PullRequestPublisher = {
+      async publish() {
+        throw new Error("PR publisher should not run when the PR is already recorded");
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      durableStore,
+      pullRequestPublisher: publisher,
+      pullRequestEvidencePublisher: evidencePublisher,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.start({ schedule: false });
+    await orchestrator.reconcileOnce();
+
+    expect(evidencePublished).toHaveLength(1);
+    expect(tracker.comments).toEqual([{ issue_id: activeIssue.id, body: "Published PR: https://github.test/acme/widgets/pull/53" }]);
+    expect(tracker.getIssue(activeIssue.id)?.state).toBe("Needs Human");
+    expect(orchestrator.issueSnapshot(activeIssue.identifier)).toMatchObject({
+      status: "completed",
+      tracked: {
+        github_evidence_comment_id: 5300,
+        github_pr_link_commented_number: 53,
+        tracker_review_state: "Needs Human",
+        github_publication_transaction: { status: "completed", phase: "completed" }
+      }
+    });
+    await orchestrator.stop();
+  });
+
+  test("retries failed evidence publication from the publication ledger", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "takt-orch-publication-retry-evidence-"));
+    const cfg = {
+      ...config(root, "node missing.js"),
+      tracker: {
+        ...config(root, "node missing.js").tracker,
+        claim_state: "In Progress",
+        review_state: "Needs Human"
+      },
+      github: {
+        ...githubDisabled(),
+        enabled: true,
+        owner: "acme",
+        repo: "widgets",
+        token: "github-token"
+      }
+    };
+    const activeIssue = issue({ id: "i-publication-evidence", identifier: "SAM-54", state: "In Progress", title: "Retry evidence" });
+    const workspacePath = path.join(cfg.workspace.root, activeIssue.identifier);
+    const pullRequest = {
+      number: 54,
+      url: "https://github.test/acme/widgets/pull/54",
+      branch: "takt/sam-54-retry-evidence",
+      title: "SAM-54: Retry evidence",
+      created: true
+    };
+    const tracker = new LocalTracker([activeIssue]);
+    const durableStore: DurableStateStore = {
+      async load() {
+        return durablePublicationSnapshot(
+          activeIssue,
+          publicationTransaction(activeIssue, workspacePath, {
+            status: "failed",
+            phase: "evidence_started",
+            branch: pullRequest.branch,
+            pull_request: pullRequest,
+            evidence_manifest: { summary: "Evidence should be retried.", verification: ["pnpm test"] },
+            last_error: "GitHub comment update failed"
+          }),
+          {
+            github_pull_request: pullRequest,
+            github_evidence_last_error: "GitHub comment update failed"
+          }
+        );
+      },
+      async save() {}
+    };
+    const evidencePublisher: PullRequestEvidencePublisher = {
+      async publish() {
+        return { comment_id: 5400, url: "https://github.test/acme/widgets/pull/54#issuecomment-5400", warnings: [] };
+      }
+    };
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "Do {{ issue.identifier }}", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      durableStore,
+      pullRequestEvidencePublisher: evidencePublisher,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.start({ schedule: false });
+    await orchestrator.reconcileOnce();
+
+    expect(orchestrator.issueSnapshot(activeIssue.identifier)).toMatchObject({
+      status: "completed",
+      last_error: null,
+      tracked: {
+        github_evidence_comment_id: 5400,
+        github_evidence_comment_url: "https://github.test/acme/widgets/pull/54#issuecomment-5400",
+        github_publication_transaction: { status: "completed", phase: "completed", last_error: null }
+      }
+    });
+    expect(tracker.getIssue(activeIssue.id)?.state).toBe("Needs Human");
     await orchestrator.stop();
   });
 
@@ -2347,6 +2595,58 @@ function mergedInspection(): PullRequestInspection {
     review_comments: [],
     issue_comments: [],
     review_threads: []
+  };
+}
+
+function durablePublicationSnapshot(issueRecord: Issue, transaction: Record<string, unknown>, tracked: Record<string, unknown> = {}): DurableStateSnapshot {
+  return {
+    schema_version: 1,
+    saved_at: new Date().toISOString(),
+    retry_attempts: [],
+    completed_issue_ids: [],
+    issue_history: [
+      {
+        issue_id: issueRecord.id,
+        issue_identifier: issueRecord.identifier,
+        workspace_path: typeof transaction.workspace_path === "string" ? transaction.workspace_path : null,
+        restart_count: 0,
+        last_error: typeof transaction.last_error === "string" ? transaction.last_error : null,
+        run_attempts: [],
+        recent_events: [],
+        tracked: {
+          ...tracked,
+          github_publication_transaction: transaction
+        }
+      }
+    ],
+    recent_events: [],
+    codex_totals: { input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0 },
+    codex_rate_limits: null
+  };
+}
+
+function publicationTransaction(issueRecord: Issue, workspacePath: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const now = "2026-05-17T00:00:00.000Z";
+  return {
+    id: `${issueRecord.id}:test-publication`,
+    status: "in_progress",
+    phase: "started",
+    started_at: now,
+    updated_at: now,
+    issue_id: issueRecord.id,
+    issue_identifier: issueRecord.identifier,
+    workspace_path: workspacePath,
+    branch: `takt/${issueRecord.identifier.toLowerCase()}-${issueRecord.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`,
+    manifest: {
+      title: `${issueRecord.identifier}: ${issueRecord.title}`,
+      summary: "Done",
+      verification: ["pnpm test"],
+      risk: "Low"
+    },
+    evidence_manifest: null,
+    attempts: 1,
+    last_error: null,
+    ...overrides
   };
 }
 

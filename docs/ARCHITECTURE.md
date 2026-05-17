@@ -13,7 +13,7 @@ Takt is split into layers that mirror `SPEC.md` and keep the service legible to 
 - Tracker integration: `src/tracker/linear.ts`
   - Implements Linear candidate fetch, terminal-state fetch, state refresh, state transitions, comments, normalization, pagination, and the `linear_graphql` extension backend.
 - PR publishing: `src/github/publisher.ts`
-  - Pushes committed worker branches and creates or updates GitHub pull requests with orchestrator-held credentials after a worker writes the configured PR-ready manifest.
+  - Pushes committed worker branches and creates or updates GitHub pull requests with orchestrator-held credentials after a worker writes the configured PR-ready manifest. It emits durable publication checkpoints around branch push and PR create/update side effects.
 - PR lifecycle tracking: `src/github/tracker.ts`
   - Discovers open Takt PRs by branch prefix after restart, then inspects PRs, head check runs, top-level PR conversation comments, reviews, inline review comments, and unresolved review threads so the orchestrator can decide whether to wait for humans, requeue worker follow-up, or record terminal PR state.
 - PR evidence publishing: `src/github/evidence.ts`
@@ -29,7 +29,7 @@ Takt is split into layers that mirror `SPEC.md` and keep the service legible to 
 - Coordination: `src/orchestrator/orchestrator.ts`
   - Owns mutable scheduler state, polling, candidate dispatch decisions, reconciliation, retry timers, token accounting, and runtime snapshots.
 - Durable state: `src/persistence/jsonStateStore.ts`
-  - Persists restart-meaningful scheduler metadata under `workspace.root/.takt/state.json` and restores retry/history state before the first startup poll.
+  - Persists restart-meaningful scheduler metadata under `workspace.root/.takt/state.json` and restores retry/history state before the first startup poll. Issue history includes publication transaction phases so startup reconciliation can resume partially completed PR publication, evidence, Linear comment, and review-state handoff work.
 - Observability and control: `src/observability/*`, `src/http/*`
   - Emits structured key/value logs and optionally exposes dashboard/API endpoints, including the latest dispatch-decision reasons for candidate issues that did or did not run.
 - Deterministic factory harness: `src/harness/toyWebappFactory.test.ts`, `examples/toy-webapp`
@@ -42,7 +42,7 @@ Takt is split into layers that mirror `SPEC.md` and keep the service legible to 
 - Workspace paths must remain below the configured workspace root.
 - The Takt Linear MCP server is hosted by the orchestrator. Host workers receive a loopback URL; Docker workers receive a `host.docker.internal` URL plus a per-run bearer-token env-var reference. Linear auth stays inside the orchestrator-owned tracker adapter.
 - Tracker secrets are removed from the Codex app-server environment and redacted from Takt logs and status events. Workers are instructed to treat `.takt` as orchestrator-owned wiring rather than task context.
-- GitHub publishing, discovery, inspection, evidence comments, and optional merging credentials stay in the orchestrator. Workers produce commits plus PR-ready/evidence manifests; Takt owns branch push, PR creation/update, PR status/review/comment/thread inspection, PR evidence publication, Linear PR comments, review/completion-state transitions, restart recovery for open and recently closed managed Takt PRs, follow-up requeue decisions, human-merge observation, and configured PR merges.
+- GitHub publishing, discovery, inspection, evidence comments, and optional merging credentials stay in the orchestrator. Workers produce commits plus PR-ready/evidence manifests; Takt owns branch push, PR creation/update, PR status/review/comment/thread inspection, PR evidence publication, Linear PR comments, review/completion-state transitions, publication transaction reconciliation after crashes, restart recovery for open and recently closed managed Takt PRs, follow-up requeue decisions, human-merge observation, and configured PR merges.
 - Durable state stores scheduler metadata only: retry queue, completed issue IDs, issue history, recent events, token totals, and PR metadata. It must not contain raw Linear/GitHub secrets or Codex auth material.
 - Docker workers mount only the per-issue workspace and an ephemeral per-run Codex home containing auth material copied from the configured source. Operator plugin caches, app approvals, rollout state, shell history, `keys.txt`, and the repo root are not mounted or copied into the image/build context.
 - Issue identifiers are sanitized before they become directory names.

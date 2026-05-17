@@ -62,6 +62,10 @@ export class LocalTracker implements TrackerClient, GraphqlToolExecutor {
     this.comments.push({ issue_id: issue.id, body });
   }
 
+  async hasIssueComment(issue: Issue, body: string): Promise<boolean> {
+    return this.comments.some((comment) => comment.issue_id === issue.id && comment.body === body);
+  }
+
   getIssue(id: string): Issue | null {
     return this.issues.get(id) ?? null;
   }

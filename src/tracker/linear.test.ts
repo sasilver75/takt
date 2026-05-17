@@ -188,6 +188,33 @@ describe("linear tracker", () => {
     const client = new LinearTrackerClient(config, fetchImpl as typeof fetch);
     await expect(client.commentOnIssue(normalizeIssue(rawIssue()), "Published PR")).rejects.toMatchObject({ code: "linear_comment_failed" });
   });
+
+  test("detects existing issue comments by exact body", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+      requests.push(request);
+      return new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              comments: {
+                nodes: [{ body: "Published PR: https://github.test/acme/widgets/pull/9" }, { body: "Different comment" }]
+              }
+            }
+          }
+        }),
+        { status: 200 }
+      );
+    };
+    const client = new LinearTrackerClient(config, fetchImpl as typeof fetch);
+
+    await expect(client.hasIssueComment(normalizeIssue(rawIssue()), "Published PR: https://github.test/acme/widgets/pull/9")).resolves.toBe(true);
+    await expect(client.hasIssueComment(normalizeIssue(rawIssue()), "Published PR: https://github.test/acme/widgets/pull/10")).resolves.toBe(false);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.query).toContain("SymphonyIssueComments");
+    expect(requests[0]?.variables).toEqual({ id: "id-1" });
+  });
 });
 
 function rawIssue(overrides: Record<string, unknown> = {}): Record<string, unknown> {

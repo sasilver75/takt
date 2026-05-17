@@ -23,6 +23,7 @@ import type {
   PullRequestInspection,
   PullRequestEvidencePublisher,
   PullRequestPublisher,
+  PullRequestPublicationCheckpoint,
   PullRequestTracker,
   PrReadyManifest,
   RunAttemptRecord,
@@ -36,7 +37,7 @@ import type { Logger } from "../observability/logger.js";
 import { WorkspaceManager } from "../workspace/manager.js";
 import { AgentRunHandle } from "../agent/runner.js";
 import type { LinearGraphqlBridgeHandle, LinearGraphqlBridgeStartOptions } from "../agent/linearGraphqlBridge.js";
-import { validatePrReadyManifest } from "../github/publisher.js";
+import { branchName, validatePrReadyManifest } from "../github/publisher.js";
 
 export type OrchestratorOptions = {
   getConfig: () => SymphonyConfig;
@@ -56,6 +57,29 @@ export type OrchestratorOptions = {
 
 export type OrchestratorStartOptions = {
   schedule?: boolean;
+};
+
+type PublicationAttemptResult = "not_ready" | "pending" | "completed";
+
+type PublicationTransactionStatus = "in_progress" | "failed" | "completed" | "blocked";
+
+type PublicationTransaction = {
+  id: string;
+  status: PublicationTransactionStatus;
+  phase: string;
+  started_at: string;
+  updated_at: string;
+  issue_id: string;
+  issue_identifier: string;
+  workspace_path: string | null;
+  branch: string;
+  manifest: PrReadyManifest;
+  evidence_manifest?: EvidenceManifest | null;
+  pull_request?: PublishedPullRequest;
+  last_error?: string | null;
+  attempts?: number;
+  completed_at?: string;
+  [key: string]: unknown;
 };
 
 export class Orchestrator {
@@ -289,6 +313,7 @@ export class Orchestrator {
   private async reconcileLifecycle(): Promise<void> {
     this.notifyConfigReload(this.options.getConfig());
     await this.reconcileRunningIssues();
+    await this.reconcilePublicationTransactions();
     await this.recoverPullRequests();
     await this.reconcilePullRequests();
   }
@@ -417,6 +442,93 @@ export class Orchestrator {
       this.options.logger.warn("tracker recovery state fetch failed", { error: errorMessage(error) });
       return [];
     }
+  }
+
+  private async reconcilePublicationTransactions(): Promise<void> {
+    if (!this.options.getConfig().github.enabled) return;
+    for (const record of this.state.issue_history.values()) {
+      const transaction = readPublicationTransaction(record.tracked.github_publication_transaction);
+      if (!transaction || !publicationTransactionNeedsReconcile(transaction)) continue;
+      if (this.state.running.has(record.issue_id)) continue;
+      const issue = await this.fetchIssueForPublication(record, "publication_transaction_reconcile");
+      if (!issue) continue;
+      const completed = await this.resumePublicationTransaction(record, issue, transaction);
+      if (!completed) continue;
+      this.state.completed.add(record.issue_id);
+      this.state.claimed.delete(record.issue_id);
+      const retry = this.state.retry_attempts.get(record.issue_id);
+      if (retry?.timer_handle) clearTimeout(retry.timer_handle);
+      this.state.retry_attempts.delete(record.issue_id);
+      this.persistState();
+    }
+  }
+
+  private async fetchIssueForPublication(record: IssueDebugRecord, source: string): Promise<Issue | null> {
+    try {
+      const refreshed = await this.options.tracker.fetchIssueStatesByIds([record.issue_id]);
+      const issue = refreshed[0] ?? null;
+      if (issue) return issue;
+      const message = "Tracked issue could not be refreshed for publication reconciliation";
+      record.last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "publication_transaction_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: `${source}: ${message}`
+      });
+      return null;
+    } catch (error) {
+      const message = errorMessage(error);
+      record.last_error = message;
+      this.recordEvent({
+        at: new Date().toISOString(),
+        event: "publication_transaction_failed",
+        issue_id: record.issue_id,
+        issue_identifier: record.issue_identifier,
+        message: `${source}: ${message}`
+      });
+      return null;
+    }
+  }
+
+  private async resumePublicationTransaction(record: IssueDebugRecord, issue: Issue, transaction: PublicationTransaction): Promise<boolean> {
+    let current = await this.markPublicationPhase(record, transaction, "reconcile_started", { attempts: (transaction.attempts ?? 0) + 1, last_error: null });
+    const workspacePath = current.workspace_path ?? record.workspace_path;
+    if (!workspacePath) {
+      await this.failPublicationTransaction(record, current, "Publication transaction has no workspace path");
+      return false;
+    }
+
+    let pullRequest = current.pull_request ?? readTrackedPullRequest(record.tracked.github_pull_request);
+    if (!pullRequest) {
+      if (!this.options.pullRequestPublisher) {
+        await this.failPublicationTransaction(record, current, "Pull request publisher is unavailable");
+        return false;
+      }
+      try {
+        const manifest = current.manifest;
+        const evidenceManifest = current.evidence_manifest ?? (await this.readEvidenceManifestForPublish(workspacePath, this.options.getConfig().github.evidence_file));
+        const published = await this.options.pullRequestPublisher.publish({
+          issue,
+          workspacePath,
+          manifest,
+          evidenceManifest,
+          onCheckpoint: async (checkpoint) => {
+            current = await this.recordPublicationCheckpoint(record, current, checkpoint);
+          }
+        });
+        record.tracked.github_pull_request = published;
+        current = await this.recordPublicationPullRequest(record, current, published);
+        pullRequest = published;
+      } catch (error) {
+        await this.failPublicationTransaction(record, current, errorMessage(error));
+        return false;
+      }
+    }
+
+    record.tracked.github_pull_request = pullRequest;
+    return await this.completePublicationTransaction(record, issue, pullRequest, workspacePath, "publication_transaction_reconcile", current);
   }
 
   private hasTrackedPullRequest(number: number): boolean {
@@ -652,6 +764,9 @@ export class Orchestrator {
     if (isTerminalState(issue.state, this.options.getConfig())) {
       return { eligible: false, reason: "state_terminal", message: `${issue.state} is in tracker.terminal_states` };
     }
+    if (this.hasActivePublicationTransaction(issue)) {
+      return { eligible: false, reason: "publication_transaction_in_progress", message: "A managed PR publication transaction is still reconciling" };
+    }
     if (this.hasTrackedPullRequestHandoff(issue)) {
       return { eligible: false, reason: "pull_request_handoff_exists", message: "A managed PR is already tracked for this issue" };
     }
@@ -784,8 +899,12 @@ export class Orchestrator {
     record.workspace_path = result.workspace_path ?? entry.workspace_path;
     this.finishRunAttempt(record, entry, result);
     if (result.ok) {
-      if (await this.tryPublishPullRequest(entry.issue, record.workspace_path)) {
+      const publication = await this.tryPublishPullRequest(entry.issue, record.workspace_path);
+      if (publication === "completed") {
         this.state.completed.add(issueId);
+        this.state.claimed.delete(issueId);
+        this.persistState();
+      } else if (publication === "pending") {
         this.state.claimed.delete(issueId);
         this.persistState();
       } else {
@@ -820,33 +939,37 @@ export class Orchestrator {
     return updated;
   }
 
-  private async tryPublishPullRequest(issue: Issue, workspacePath: string | null): Promise<boolean> {
+  private async tryPublishPullRequest(issue: Issue, workspacePath: string | null): Promise<PublicationAttemptResult> {
     const config = this.options.getConfig();
-    if (!config.github.enabled || !this.options.pullRequestPublisher || !workspacePath) return false;
+    if (!config.github.enabled || !this.options.pullRequestPublisher || !workspacePath) return "not_ready";
+    const record = this.ensureRecord(issue);
     try {
       const manifest = await readPrReadyManifest(workspacePath, config.github.pr_ready_file);
-      if (!manifest) return false;
+      if (!manifest) return "not_ready";
       const evidenceManifest = await this.readEvidenceManifestForPublish(workspacePath, config.github.evidence_file);
-      const published = await this.options.pullRequestPublisher.publish({ issue, workspacePath, manifest, evidenceManifest });
-      const record = this.ensureRecord(issue);
-      const previousPullRequest = readTrackedPullRequest(record.tracked.github_pull_request);
-      record.tracked.github_pull_request = published;
-      await this.publishPullRequestEvidence(record, published, workspacePath);
-      await this.commentPublishedPullRequestLink(record, issue, published, previousPullRequest);
-      await this.ensureIssueReviewState(record, issue, "pull_request_publish", true);
-      this.markPullRequestFollowupHandled(record);
-      record.last_error = null;
-      this.recordEvent({
-        at: new Date().toISOString(),
-        event: "pull_request_published",
-        issue_id: issue.id,
-        issue_identifier: issue.identifier,
-        message: published.url
+      let transaction = await this.beginPublicationTransaction(record, issue, workspacePath, manifest, evidenceManifest);
+      const published = await this.options.pullRequestPublisher.publish({
+        issue,
+        workspacePath,
+        manifest,
+        evidenceManifest,
+        onCheckpoint: async (checkpoint) => {
+          transaction = await this.recordPublicationCheckpoint(record, transaction, checkpoint);
+        }
       });
-      return true;
+      record.tracked.github_pull_request = published;
+      transaction = await this.recordPublicationPullRequest(record, transaction, published);
+      const completed = await this.completePublicationTransaction(record, issue, published, workspacePath, "pull_request_publish", transaction);
+      return completed ? "completed" : "pending";
     } catch (error) {
       const message = errorMessage(error);
-      this.ensureRecord(issue).last_error = message;
+      record.last_error = message;
+      const transaction = readPublicationTransaction(record.tracked.github_publication_transaction);
+      const hasExternalSideEffect = transaction ? publicationTransactionHasExternalSideEffect(transaction) : false;
+      if (transaction) {
+        if (hasExternalSideEffect) await this.failPublicationTransaction(record, transaction, message);
+        else await this.blockPublicationTransaction(record, transaction, message);
+      }
       this.recordEvent({
         at: new Date().toISOString(),
         event: "pull_request_publish_failed",
@@ -854,47 +977,212 @@ export class Orchestrator {
         issue_identifier: issue.identifier,
         message
       });
+      return hasExternalSideEffect ? "pending" : "not_ready";
+    }
+  }
+
+  private async beginPublicationTransaction(
+    record: IssueDebugRecord,
+    issue: Issue,
+    workspacePath: string,
+    manifest: PrReadyManifest,
+    evidenceManifest: EvidenceManifest | null
+  ): Promise<PublicationTransaction> {
+    const existing = readPublicationTransaction(record.tracked.github_publication_transaction);
+    if (existing && publicationTransactionNeedsReconcile(existing)) {
+      return await this.markPublicationPhase(record, existing, "worker_publish_resumed", {
+        workspace_path: workspacePath,
+        manifest,
+        evidence_manifest: evidenceManifest
+      });
+    }
+    const now = new Date().toISOString();
+    const transaction: PublicationTransaction = {
+      id: publicationTransactionId(issue, manifest),
+      status: "in_progress",
+      phase: "started",
+      started_at: now,
+      updated_at: now,
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      workspace_path: workspacePath,
+      branch: branchName(this.options.getConfig().github.branch_prefix, issue),
+      manifest,
+      evidence_manifest: evidenceManifest,
+      attempts: 1,
+      last_error: null
+    };
+    record.workspace_path = workspacePath;
+    record.tracked.github_publication_transaction = transaction;
+    await this.persistStateNow();
+    return transaction;
+  }
+
+  private async recordPublicationCheckpoint(
+    record: IssueDebugRecord,
+    transaction: PublicationTransaction,
+    checkpoint: PullRequestPublicationCheckpoint
+  ): Promise<PublicationTransaction> {
+    const at = checkpoint.at ?? new Date().toISOString();
+    return await this.markPublicationPhase(record, transaction, checkpoint.phase, {
+      ...(checkpoint.branch ? { branch: checkpoint.branch } : {}),
+      ...(checkpoint.operation ? { operation: checkpoint.operation } : {}),
+      ...(checkpoint.pullRequest ? { pull_request: checkpoint.pullRequest } : {}),
+      [`${checkpoint.phase}_at`]: at
+    });
+  }
+
+  private async recordPublicationPullRequest(
+    record: IssueDebugRecord,
+    transaction: PublicationTransaction,
+    pullRequest: PublishedPullRequest
+  ): Promise<PublicationTransaction> {
+    return await this.markPublicationPhase(record, transaction, "pull_request_recorded", {
+      pull_request: pullRequest,
+      pull_request_recorded_at: new Date().toISOString()
+    });
+  }
+
+  private async completePublicationTransaction(
+    record: IssueDebugRecord,
+    issue: Issue,
+    pullRequest: PublishedPullRequest,
+    workspacePath: string,
+    source: string,
+    transaction: PublicationTransaction
+  ): Promise<boolean> {
+    let current = transaction;
+    current = await this.markPublicationPhase(record, current, "evidence_started");
+    const evidenceResult = await this.publishPullRequestEvidence(record, pullRequest, workspacePath, current.evidence_manifest ?? null);
+    if (evidenceResult === "failed") {
+      const message = typeof record.tracked.github_evidence_last_error === "string" ? record.tracked.github_evidence_last_error : "Evidence publication failed";
+      await this.failPublicationTransaction(record, current, message);
       return false;
     }
+    current = await this.markPublicationPhase(record, current, evidenceResult === "published" ? "evidence_published" : "evidence_skipped");
+
+    try {
+      current = await this.markPublicationPhase(record, current, "linear_comment_started");
+      await this.commentPublishedPullRequestLink(record, issue, pullRequest);
+      const commented = record.tracked.github_pr_link_commented_number === pullRequest.number || record.tracked.github_pr_link_commented_url === pullRequest.url;
+      current = await this.markPublicationPhase(record, current, commented ? "linear_comment_posted" : "linear_comment_skipped");
+    } catch (error) {
+      await this.failPublicationTransaction(record, current, errorMessage(error));
+      return false;
+    }
+
+    try {
+      current = await this.markPublicationPhase(record, current, "review_state_started");
+      await this.ensureIssueReviewState(record, issue, source, true);
+      current = await this.markPublicationPhase(record, current, this.options.getConfig().tracker.review_state ? "review_state_reconciled" : "review_state_skipped");
+    } catch (error) {
+      await this.failPublicationTransaction(record, current, errorMessage(error));
+      return false;
+    }
+
+    this.markPullRequestFollowupHandled(record);
+    record.last_error = null;
+    current = await this.markPublicationPhase(record, current, "completed", {
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      last_error: null
+    });
+    this.recordEvent({
+      at: new Date().toISOString(),
+      event: "pull_request_published",
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      message: pullRequest.url
+    });
+    return current.status === "completed";
+  }
+
+  private async markPublicationPhase(
+    record: IssueDebugRecord,
+    transaction: PublicationTransaction,
+    phase: string,
+    updates: Partial<PublicationTransaction> = {}
+  ): Promise<PublicationTransaction> {
+    const next: PublicationTransaction = {
+      ...transaction,
+      ...updates,
+      status: updates.status ?? (transaction.status === "completed" || transaction.status === "blocked" ? transaction.status : "in_progress"),
+      phase,
+      updated_at: new Date().toISOString()
+    };
+    record.tracked.github_publication_transaction = next;
+    await this.persistStateNow();
+    return next;
+  }
+
+  private async failPublicationTransaction(record: IssueDebugRecord, transaction: PublicationTransaction, message: string): Promise<void> {
+    const failed: PublicationTransaction = {
+      ...transaction,
+      status: "failed",
+      last_error: message,
+      updated_at: new Date().toISOString()
+    };
+    record.last_error = message;
+    record.tracked.github_publication_transaction = failed;
+    this.recordEvent({
+      at: failed.updated_at,
+      event: "publication_transaction_failed",
+      issue_id: record.issue_id,
+      issue_identifier: record.issue_identifier,
+      message
+    });
+    await this.persistStateNow();
+  }
+
+  private async blockPublicationTransaction(record: IssueDebugRecord, transaction: PublicationTransaction, message: string): Promise<void> {
+    const blocked: PublicationTransaction = {
+      ...transaction,
+      status: "blocked",
+      last_error: message,
+      updated_at: new Date().toISOString()
+    };
+    record.last_error = message;
+    record.tracked.github_publication_transaction = blocked;
+    this.recordEvent({
+      at: blocked.updated_at,
+      event: "publication_transaction_blocked",
+      issue_id: record.issue_id,
+      issue_identifier: record.issue_identifier,
+      message
+    });
+    await this.persistStateNow();
   }
 
   private async commentPublishedPullRequestLink(
     record: IssueDebugRecord,
     issue: Issue,
-    published: PublishedPullRequest,
-    previousPullRequest: PublishedPullRequest | null
+    published: PublishedPullRequest
   ): Promise<void> {
     if (!this.options.tracker.commentOnIssue) return;
+    const commentBody = `Published PR: ${published.url}`;
     const alreadyCommented =
       record.tracked.github_pr_link_commented_number === published.number || record.tracked.github_pr_link_commented_url === published.url;
-    const unchangedExistingPr = previousPullRequest?.number === published.number && previousPullRequest.url === published.url && !published.created;
-    if (alreadyCommented || unchangedExistingPr) return;
-    await this.options.tracker.commentOnIssue(issue, `Published PR: ${published.url}`);
+    if (alreadyCommented) return;
+    if (this.options.tracker.hasIssueComment && (await this.options.tracker.hasIssueComment(issue, commentBody))) {
+      record.tracked.github_pr_link_commented_number = published.number;
+      record.tracked.github_pr_link_commented_url = published.url;
+      record.tracked.github_pr_link_commented_at = new Date().toISOString();
+      record.tracked.github_pr_link_comment_recovered = true;
+      return;
+    }
+    await this.options.tracker.commentOnIssue(issue, commentBody);
     record.tracked.github_pr_link_commented_number = published.number;
     record.tracked.github_pr_link_commented_url = published.url;
     record.tracked.github_pr_link_commented_at = new Date().toISOString();
   }
 
-  private async publishPullRequestEvidence(record: IssueDebugRecord, pullRequest: PublishedPullRequest, workspacePath: string): Promise<void> {
-    if (!this.options.pullRequestEvidencePublisher) return;
-    const config = this.options.getConfig();
-    let manifest: EvidenceManifest | null = null;
-    try {
-      manifest = await readEvidenceManifest(workspacePath, config.github.evidence_file);
-    } catch (error) {
-      const message = errorMessage(error);
-      record.tracked.github_evidence_last_error = message;
-      this.recordEvent({
-        at: new Date().toISOString(),
-        event: "pull_request_evidence_failed",
-        issue_id: record.issue_id,
-        issue_identifier: record.issue_identifier,
-        message
-      });
-      return;
-    }
-    if (!manifest) return;
-
+  private async publishPullRequestEvidence(
+    record: IssueDebugRecord,
+    pullRequest: PublishedPullRequest,
+    workspacePath: string,
+    manifest: EvidenceManifest | null
+  ): Promise<"published" | "skipped" | "failed"> {
+    if (!this.options.pullRequestEvidencePublisher || !manifest) return "skipped";
     try {
       const previousCommentId = typeof record.tracked.github_evidence_comment_id === "number" ? record.tracked.github_evidence_comment_id : null;
       const published = await this.options.pullRequestEvidencePublisher.publish({ pullRequest, workspacePath, manifest, previousCommentId });
@@ -911,6 +1199,7 @@ export class Orchestrator {
         issue_identifier: record.issue_identifier,
         message: published.warnings.length > 0 ? `${published.url ?? "evidence published"} (${published.warnings.length} warning${published.warnings.length === 1 ? "" : "s"})` : published.url
       });
+      return "published";
     } catch (error) {
       const message = errorMessage(error);
       record.tracked.github_evidence_last_error = message;
@@ -921,6 +1210,7 @@ export class Orchestrator {
         issue_identifier: record.issue_identifier,
         message
       });
+      return "failed";
     }
   }
 
@@ -1111,6 +1401,13 @@ export class Orchestrator {
     return true;
   }
 
+  private hasActivePublicationTransaction(issue: Issue): boolean {
+    const record = this.state.issue_history.get(issue.identifier);
+    if (!record || record.issue_id !== issue.id) return false;
+    const transaction = readPublicationTransaction(record.tracked.github_publication_transaction);
+    return Boolean(transaction && transaction.status !== "completed" && transaction.status !== "blocked");
+  }
+
   private markPullRequestFollowupHandled(record: IssueDebugRecord): void {
     const inflightKeys = readStringArray(record.tracked.github_pr_inflight_followup_keys);
     if (inflightKeys.length === 0) return;
@@ -1268,6 +1565,11 @@ export class Orchestrator {
       .catch((error: unknown) => {
         this.options.logger.warn("durable state save failed", { error: errorMessage(error) });
       });
+  }
+
+  private async persistStateNow(): Promise<void> {
+    this.persistState();
+    await this.flushPersistence();
   }
 
   private async flushPersistence(): Promise<void> {
@@ -1431,6 +1733,72 @@ function readTrackedPullRequest(value: unknown): PublishedPullRequest | null {
   const created = typeof record.created === "boolean" ? record.created : false;
   if (!number || !url || !branch || !title) return null;
   return { number, url, branch, title, created };
+}
+
+function readPublicationTransaction(value: unknown): PublicationTransaction | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const status = readPublicationTransactionStatus(record.status);
+  const id = typeof record.id === "string" ? record.id : null;
+  const phase = typeof record.phase === "string" ? record.phase : null;
+  const startedAt = typeof record.started_at === "string" ? record.started_at : null;
+  const updatedAt = typeof record.updated_at === "string" ? record.updated_at : startedAt;
+  const issueId = typeof record.issue_id === "string" ? record.issue_id : null;
+  const issueIdentifier = typeof record.issue_identifier === "string" ? record.issue_identifier : null;
+  const branch = typeof record.branch === "string" ? record.branch : null;
+  const manifest = readPublicationPrReadyManifest(record.manifest);
+  if (!status || !id || !phase || !startedAt || !updatedAt || !issueId || !issueIdentifier || !branch || !manifest) return null;
+  const pullRequest = readTrackedPullRequest(record.pull_request);
+  const evidenceManifest = readTrackedEvidenceManifest(record.evidence_manifest);
+  const completedAt = typeof record.completed_at === "string" ? record.completed_at : null;
+  return {
+    ...(record as Record<string, unknown>),
+    id,
+    status,
+    phase,
+    started_at: startedAt,
+    updated_at: updatedAt,
+    issue_id: issueId,
+    issue_identifier: issueIdentifier,
+    workspace_path: typeof record.workspace_path === "string" ? record.workspace_path : null,
+    branch,
+    manifest,
+    ...(evidenceManifest ? { evidence_manifest: evidenceManifest } : {}),
+    ...(pullRequest ? { pull_request: pullRequest } : {}),
+    last_error: typeof record.last_error === "string" ? record.last_error : null,
+    attempts: Number.isInteger(record.attempts) && Number(record.attempts) > 0 ? Number(record.attempts) : 0,
+    ...(completedAt ? { completed_at: completedAt } : {})
+  };
+}
+
+function readPublicationTransactionStatus(value: unknown): PublicationTransactionStatus | null {
+  return value === "in_progress" || value === "failed" || value === "completed" || value === "blocked" ? value : null;
+}
+
+function readPublicationPrReadyManifest(value: unknown): PrReadyManifest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    ...(typeof record.title === "string" ? { title: record.title } : {}),
+    ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+    ...(typeof record.body === "string" ? { body: record.body } : {}),
+    ...(Array.isArray(record.verification) ? { verification: record.verification.filter((entry): entry is string => typeof entry === "string") } : {}),
+    ...(typeof record.risk === "string" ? { risk: record.risk } : {})
+  };
+}
+
+function publicationTransactionNeedsReconcile(transaction: PublicationTransaction): boolean {
+  return transaction.status === "in_progress" || transaction.status === "failed";
+}
+
+function publicationTransactionHasExternalSideEffect(transaction: PublicationTransaction): boolean {
+  if (transaction.pull_request) return true;
+  return transaction.phase !== "started" && transaction.phase !== "worker_publish_resumed";
+}
+
+function publicationTransactionId(issue: Issue, manifest: PrReadyManifest): string {
+  const hash = createHash("sha256").update(JSON.stringify({ issue_id: issue.id, identifier: issue.identifier, manifest })).digest("hex").slice(0, 16);
+  return `${issue.id}:${hash}`;
 }
 
 function readTrackedEvidence(tracked: Record<string, unknown>): unknown {

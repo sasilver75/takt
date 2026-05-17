@@ -196,6 +196,7 @@ export type TrackerClient = {
   fetchIssuesByIdentifiers?(identifiers: string[]): Promise<Issue[]>;
   transitionIssue?(issue: Issue, stateName: string): Promise<Issue>;
   commentOnIssue?(issue: Issue, body: string): Promise<void>;
+  hasIssueComment?(issue: Issue, body: string): Promise<boolean>;
 };
 
 export type GraphqlToolExecutor = {
@@ -253,7 +254,21 @@ export type PullRequestDiscoveryOptions = {
 };
 
 export type PullRequestPublisher = {
-  publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest; evidenceManifest?: EvidenceManifest | null }): Promise<PublishedPullRequest>;
+  publish(input: {
+    issue: Issue;
+    workspacePath: string;
+    manifest: PrReadyManifest;
+    evidenceManifest?: EvidenceManifest | null;
+    onCheckpoint?: (checkpoint: PullRequestPublicationCheckpoint) => Promise<void> | void;
+  }): Promise<PublishedPullRequest>;
+};
+
+export type PullRequestPublicationCheckpoint = {
+  phase: "branch_push_started" | "branch_pushed" | "pull_request_publish_started" | "pull_request_published";
+  at?: string;
+  branch?: string;
+  operation?: "create" | "update";
+  pullRequest?: PublishedPullRequest;
 };
 
 export type PullRequestLifecycleState = "open" | "merged" | "closed";

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { EvidenceManifest, Issue, PrReadyManifest, PublishedPullRequest, PullRequestPublisher, SymphonyConfig } from "../domain.js";
+import type { EvidenceManifest, Issue, PrReadyManifest, PublishedPullRequest, PullRequestPublicationCheckpoint, PullRequestPublisher, SymphonyConfig } from "../domain.js";
 import { SymphonyError } from "../errors.js";
 import type { Logger } from "../observability/logger.js";
 import { GitHubApiClient, type FetchLike } from "./client.js";
@@ -22,7 +22,13 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     this.api = new GitHubApiClient(getConfig, fetchImpl);
   }
 
-  async publish(input: { issue: Issue; workspacePath: string; manifest: PrReadyManifest; evidenceManifest?: EvidenceManifest | null }): Promise<PublishedPullRequest> {
+  async publish(input: {
+    issue: Issue;
+    workspacePath: string;
+    manifest: PrReadyManifest;
+    evidenceManifest?: EvidenceManifest | null;
+    onCheckpoint?: (checkpoint: PullRequestPublicationCheckpoint) => Promise<void> | void;
+  }): Promise<PublishedPullRequest> {
     const config = this.getConfig().github;
     if (!config.enabled) throw new SymphonyError("github_disabled", "GitHub publishing is disabled");
     if (!config.owner || !config.repo || !config.token) throw new SymphonyError("github_not_configured", "GitHub publishing is not fully configured");
@@ -41,11 +47,26 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     const body = renderPullRequestBody(input.issue, input.manifest);
     const existing = await this.findOpenPullRequest(branch);
     await git(input.workspacePath, ["checkout", "-B", branch]);
+    await input.onCheckpoint?.({ phase: "branch_push_started", at: new Date().toISOString(), branch });
     await this.pushBranch(input.workspacePath, branch, existing?.head_sha ?? null);
+    await input.onCheckpoint?.({ phase: "branch_pushed", at: new Date().toISOString(), branch });
 
+    await input.onCheckpoint?.({
+      phase: "pull_request_publish_started",
+      at: new Date().toISOString(),
+      branch,
+      operation: existing ? "update" : "create"
+    });
     const published = existing
       ? await this.updatePullRequest(existing.number, { title, body })
       : await this.createPullRequest({ title, body, branch });
+    await input.onCheckpoint?.({
+      phase: "pull_request_published",
+      at: new Date().toISOString(),
+      branch,
+      operation: existing ? "update" : "create",
+      pullRequest: { number: published.number, url: published.url, branch, title, created: !existing }
+    });
     this.logger.info("github pr published", {
       issue_id: input.issue.id,
       issue_identifier: input.issue.identifier,

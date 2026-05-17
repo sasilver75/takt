@@ -172,6 +172,21 @@ export class LinearTrackerClient implements TrackerClient {
     }
   }
 
+  async hasIssueComment(issue: Issue, bodyText: string): Promise<boolean> {
+    const query = `
+      query SymphonyIssueComments($id: String!) {
+        issue(id: $id) {
+          comments(first: 100) {
+            nodes { body }
+          }
+        }
+      }
+    `;
+    const body = await this.graphql(query, { id: issue.id });
+    const comments = readArrayAt(body, ["data", "issue", "comments", "nodes"]);
+    return comments.some((comment) => comment && typeof comment === "object" && (comment as Record<string, unknown>).body === bodyText);
+  }
+
   private async workflowStateIdForIssue(issueId: string, stateName: string): Promise<string> {
     const issueQuery = `
       query SymphonyIssueTeam($id: String!) {

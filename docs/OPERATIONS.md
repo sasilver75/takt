@@ -85,6 +85,8 @@ When `github.enabled: true`, the issue-to-PR loop is:
 5. Takt creates or updates a GitHub PR against `github.base_branch`.
 6. Takt publishes evidence as a sticky PR conversation comment, comments each PR URL in Linear at most once, and moves the issue to `tracker.review_state`.
 
+Takt persists publication transaction phases before and after orchestrator-owned branch push, PR create/update, evidence comment, Linear comment, and review-state side effects. After restart, reconciliation resumes unfinished publication transactions from the durable ledger instead of launching another worker for the same handoff.
+
 After a PR is published, Takt owns the PR lifecycle reconciliation loop:
 
 - On every poll, Takt discovers open PRs whose head branch starts with `github.branch_prefix`, infers the Linear issue identifier from the PR title/body/branch, and reconnects them to tracker issues. On first successful PR recovery after process start, it also scans recently updated closed PR pages with the same branch-prefix filter, which lets a restarted orchestrator observe human-merged managed PRs even if the merge happened while Takt was offline. The closed scan is bounded to the five most recent GitHub pages to avoid turning every poll into a full repository-history crawl.
@@ -130,7 +132,13 @@ TAKT_LIVE_INTEGRATION=1 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm integration:liv
 
 Without `TAKT_LIVE_INTEGRATION=1`, the command prints `SKIP` and exits successfully. When enabled, it loads the workflow, validates dispatch config, reads the configured Linear candidate queue, and reads GitHub repository metadata when `github.enabled` is true. It does not transition issues, comment on tickets, push branches, open PRs, or run Codex workers. Mutating full-loop checks remain controlled operator runs.
 
-Live runs performed during May 15-16, 2026:
+The publication-ledger canary is mutating and separately gated. It creates a dedicated Linear issue, commits a canary file in a temporary workspace, pushes a `takt-canary/*` branch, deliberately stops after the branch-push checkpoint, then restarts reconciliation from durable state to create the PR, publish evidence, comment in Linear, and move the issue to review:
+
+```bash
+TAKT_LIVE_PUBLICATION_CANARY=1 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm integration:publication-canary -- ./examples/WORKFLOW.md
+```
+
+Live runs performed during May 15-17, 2026:
 
 - Linear project: `Takt` (`5f14e4e68dc4`).
 - `SAM-65`, `Validate Takt live run on Takt`: real Codex app-server ran through Takt, created and locally committed `LIVE_RUN_RESULT.md` in the per-issue workspace, added a Linear handoff comment, and moved the issue to `Needs Human`. This first run exposed two operator issues: the GitHub remote still contained the placeholder source, and an in-repo workspace root allowed package-manager parent traversal.
@@ -144,6 +152,7 @@ Live runs performed during May 15-16, 2026:
 - `SAM-75`, `Validate Takt evidence artifact links in a live PR`: real Docker/Codex worker ran from an isolated live-validation workspace root, used `takt_linear.linear_graphql`, added a small committed evidence artifact on the worker branch, ran `pnpm verify`, wrote `TAKT_PR_READY.json` and `TAKT_EVIDENCE.json`, and let Takt publish PR #4 plus sticky evidence comment `https://github.com/sasilver75/takt/pull/4#issuecomment-4467788558`. The evidence artifact rendered as a GitHub blob link to the worker branch and PR CI passed. The operator run also exposed two hardening gaps that are now covered by tests: restored PR tracking is ignored when a workflow changes `github.branch_prefix`, and dispatch validation rejects `tracker.claim_state` values that are not listed in `tracker.active_states`.
 - `SAM-76`, `Validate Takt auto-publishes uncommitted evidence artifacts`: real Docker/Codex worker ran from an isolated live-validation workspace root, used `takt_linear.linear_graphql`, committed a source documentation note, ran `pnpm verify`, left a small artifact uncommitted in the worker workspace, wrote `TAKT_PR_READY.json` and `TAKT_EVIDENCE.json`, and let Takt upload the uncommitted artifact to PR #5 before posting sticky evidence comment `https://github.com/sasilver75/takt/pull/5#issuecomment-4468087596`. CI passed on the PR. This run exposed that handoff manifests must never land on `main`; Takt now rejects PR publishing if `github.pr_ready_file` or `github.evidence_file` is tracked by git.
 - `SAM-90`, `Validate screenshot evidence artifact with takt-capture-url`: real Docker/Codex worker ran from an isolated live-validation workspace root, used `takt_linear.linear_graphql`, ran the toy webapp, captured `artifacts/SAM-90/toy-home.png` with `takt-capture-url`, ran `pnpm verify`, wrote `TAKT_PR_READY.json` and `TAKT_EVIDENCE.json`, and let Takt publish PR #6 plus sticky evidence comment `https://github.com/sasilver75/takt/pull/6#issuecomment-4468480674`. CI passed on the PR and the uploaded PNG artifact was available from the PR branch. This run exposed that evidence manifests need to distinguish completed verification checks from supporting launch/capture commands.
+- `SAM-91`, `Live publication ledger canary`: real canary created a dedicated Linear issue, pushed `takt-canary/sam-91-live-publication-ledger-canary-20260517193404`, simulated a crash after the branch-push checkpoint, restarted reconciliation from the durable publication transaction, created draft PR #7, uploaded the canary evidence artifact, posted sticky evidence comment `https://github.com/sasilver75/takt/pull/7#issuecomment-4472275319`, posted the PR link in Linear, and moved the issue to `Needs Human`.
 
 Before production use:
 
