@@ -37,6 +37,7 @@ export class AgentRunHandle {
   private client: CodexAppServerClient | null = null;
   private runtime: WorkerRuntimeLease | null = null;
   private cancelReason: string | null = null;
+  private cleanupWorkspaceOnCancel = false;
 
   constructor(private readonly options: AgentRunnerOptions) {}
 
@@ -45,9 +46,14 @@ export class AgentRunHandle {
     let workspacePath: string | undefined;
     let bridge: LinearGraphqlBridgeHandle | null = null;
     try {
+      if (this.cancelReason) return cancelledRunResult(started, this.cancelReason);
       const workspace = await this.options.workspaceManager.createForIssue(this.options.issue.identifier);
       workspacePath = workspace.path;
       this.options.workspaceManager.validateAgentCwd(workspace.path);
+      if (this.cancelReason) {
+        if (this.cleanupWorkspaceOnCancel) await this.options.workspaceManager.removeForIssue(this.options.issue.identifier);
+        return cancelledRunResult(started, this.cancelReason, workspace.path);
+      }
       const config = this.options.getConfig();
       const runtime = createWorkerRuntime(config, workspace, this.options.issue, this.options.logger);
       this.runtime = runtime;
@@ -126,11 +132,22 @@ export class AgentRunHandle {
     }
   }
 
-  async terminate(reason: string): Promise<void> {
+  async terminate(reason: string, cleanupWorkspace = false): Promise<void> {
     this.cancelReason = reason;
+    this.cleanupWorkspaceOnCancel = this.cleanupWorkspaceOnCancel || cleanupWorkspace;
     await this.client?.stop();
     await this.runtime?.cleanup();
   }
+}
+
+function cancelledRunResult(started: number, reason: string, workspacePath?: string): RunResult {
+  return {
+    ok: false,
+    reason: "cancelled",
+    error: reason,
+    ...(workspacePath ? { workspace_path: workspacePath } : {}),
+    runtime_seconds: elapsed(started)
+  };
 }
 
 async function isPrReady(workspacePath: string, config: SymphonyConfig): Promise<boolean> {

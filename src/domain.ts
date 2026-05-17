@@ -377,7 +377,7 @@ export type RunningEntry = {
   last_reported_output_tokens: number;
   last_reported_total_tokens: number;
   turn_count: number;
-  terminate(reason: string): Promise<void> | void;
+  terminate(reason: string, cleanupWorkspace?: boolean): Promise<void> | void;
 };
 
 export type RetryEntry = {

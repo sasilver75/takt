@@ -686,7 +686,7 @@ export class Orchestrator {
       last_reported_output_tokens: 0,
       last_reported_total_tokens: 0,
       turn_count: 0,
-      terminate: (reason) => handle.terminate(reason)
+      terminate: (reason, cleanupWorkspace) => handle.terminate(reason, cleanupWorkspace)
     };
     this.state.running.set(runIssue.id, entry);
     this.state.retry_attempts.delete(runIssue.id);
@@ -1084,10 +1084,24 @@ export class Orchestrator {
   private async terminateRunning(issueId: string, reason: string, cleanupWorkspace: boolean): Promise<void> {
     const entry = this.state.running.get(issueId);
     if (!entry) return;
-    await Promise.resolve(entry.terminate(reason));
     this.state.running.delete(issueId);
     this.state.claimed.delete(issueId);
+    await Promise.resolve(entry.terminate(reason, cleanupWorkspace));
+    const runtimeSeconds = Math.max((Date.now() - entry.started_at_ms) / 1000, 0);
+    this.state.codex_totals.seconds_running += runtimeSeconds;
+    const record = this.ensureRecord(entry.issue);
+    record.workspace_path = entry.workspace_path;
+    record.last_error = reason;
+    this.finishRunAttempt(record, entry, { ok: false, runtime_seconds: runtimeSeconds, error: reason, ...(entry.workspace_path ? { workspace_path: entry.workspace_path } : {}) });
     if (cleanupWorkspace) await this.options.workspaceManager.removeForIssue(entry.identifier);
+    this.recordEvent({
+      at: new Date().toISOString(),
+      event: "worker_terminated",
+      issue_id: issueId,
+      issue_identifier: entry.identifier,
+      session_id: entry.session_id,
+      message: reason
+    });
     this.persistState();
   }
 

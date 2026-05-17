@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -121,6 +121,119 @@ describe("orchestrator", () => {
     });
     await orchestrator.tick();
     expect((orchestrator.snapshot() as { counts: { running: number } }).counts.running).toBe(0);
+    await orchestrator.stop();
+  });
+
+  test("Todo issue with terminal blockers remains eligible", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-terminal-blocker-"));
+    const serverPath = path.join(root, "fake-codex.mjs");
+    await writeFile(serverPath, fakeCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const cfg = config(root, `node ${serverPath}`);
+    const ready = issue({
+      id: "i-terminal-blocker",
+      identifier: "ABC-3",
+      blocked_by: [{ id: "b", identifier: "ABC-0", state: "Done" }]
+    });
+    const tracker = new FakeTracker([ready], [], [issue({ id: ready.id, identifier: ready.identifier, state: "Human Review" })]);
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "body", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      logger: createLogger(() => undefined)
+    });
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "terminal-blocked issue dispatch");
+    expect(orchestrator.issueSnapshot("ABC-3")).toMatchObject({ attempts: { run_attempts: [{ status: "succeeded" }] } });
+    await orchestrator.stop();
+  });
+
+  test("reconciliation records terminal and non-active run termination outcomes", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-reconcile-terminate-"));
+    const serverPath = path.join(root, "fake-codex-long-running.mjs");
+    await writeFile(serverPath, fakeLongRunningCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const baseConfig = config(root, `node ${serverPath}`);
+    const cfg = { ...baseConfig, agent: { ...baseConfig.agent, max_concurrent_agents: 2 } };
+    const terminalIssue = issue({ id: "i-terminal-run", identifier: "ABC-4", state: "Todo" });
+    const nonActiveIssue = issue({ id: "i-non-active-run", identifier: "ABC-5", state: "Todo" });
+    const tracker = new FakeTracker([terminalIssue, nonActiveIssue], [], []);
+    const manager = new WorkspaceManager(() => cfg, createLogger(() => undefined));
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "body", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: manager,
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { running: number } }).counts.running === 2, "long-running dispatches");
+
+    tracker.byIds = [
+      issue({ id: terminalIssue.id, identifier: terminalIssue.identifier, state: "Done" }),
+      issue({ id: nonActiveIssue.id, identifier: nonActiveIssue.identifier, state: "Needs Human" })
+    ];
+    tracker.candidates = [];
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { running: number } }).counts.running === 0, "reconciliation terminations");
+
+    expect(orchestrator.issueSnapshot("ABC-4")).toMatchObject({
+      last_error: "terminal tracker state",
+      attempts: { run_attempts: [{ status: "failed", error: "terminal tracker state" }] }
+    });
+    await waitFor(
+      async () => {
+        try {
+          await access(manager.workspacePath("ABC-4"));
+          return false;
+        } catch {
+          return true;
+        }
+      },
+      "terminal workspace cleanup"
+    );
+    expect(orchestrator.issueSnapshot("ABC-5")).toMatchObject({
+      last_error: "non-active tracker state",
+      attempts: { run_attempts: [{ status: "failed", error: "non-active tracker state" }] }
+    });
+    await expect(access(manager.workspacePath("ABC-5"))).resolves.toBeUndefined();
+    expect((orchestrator.snapshot() as { codex_totals: { seconds_running: number } }).codex_totals.seconds_running).toBeGreaterThan(0);
+    await orchestrator.stop();
+  });
+
+  test("stall detection records termination and schedules retry", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-orch-stall-"));
+    const serverPath = path.join(root, "fake-codex-long-running.mjs");
+    await writeFile(serverPath, fakeLongRunningCodexServerSource());
+    await chmod(serverPath, 0o755);
+    const baseConfig = config(root, `node ${serverPath}`);
+    const cfg = { ...baseConfig, codex: { ...baseConfig.codex, stall_timeout_ms: 1 } };
+    const stalled = issue({ id: "i-stalled", identifier: "ABC-6", state: "Todo" });
+    const tracker = new FakeTracker([stalled], [], [stalled]);
+    const orchestrator = new Orchestrator({
+      getConfig: () => cfg,
+      getWorkflow: () => ({ config: {}, prompt_template: "body", path: path.join(root, "WORKFLOW.md"), loaded_at: new Date().toISOString() }),
+      validateDispatch: async () => undefined,
+      tracker,
+      workspaceManager: new WorkspaceManager(() => cfg, createLogger(() => undefined)),
+      logger: createLogger(() => undefined)
+    });
+
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { running: number } }).counts.running === 1, "stalled issue dispatch");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await orchestrator.tick();
+    await waitFor(() => (orchestrator.snapshot() as { counts: { retrying: number } }).counts.retrying === 1, "stall retry scheduling");
+
+    expect(orchestrator.issueSnapshot("ABC-6")).toMatchObject({
+      status: "retrying",
+      last_error: "stalled session",
+      attempts: { run_attempts: [{ status: "failed", error: "stalled session" }] }
+    });
     await orchestrator.stop();
   });
 
