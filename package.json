@@ -21,6 +21,7 @@
     "verify": "pnpm typecheck && pnpm test && pnpm toy:typecheck && pnpm toy:go:test && pnpm toy:cli:test && pnpm build && pnpm toy:build",
     "integration:live": "node --import tsx src/integration/liveProfile.ts",
     "integration:publication-canary": "node --import tsx src/integration/livePublicationCanary.ts",
+    "release:gate": "node --import tsx src/integration/releaseGate.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "codex:generate": "codex app-server generate-ts --out src/codex/generated && codex app-server generate-json-schema --out schema/codex-app-server"
   },

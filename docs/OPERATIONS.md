@@ -140,6 +140,22 @@ TAKT_LIVE_PUBLICATION_CANARY=1 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm integrat
 
 Without `--keep`, the canary closes each draft PR, deletes its `takt-canary/*` branch, and moves the Linear issue to an existing configured terminal cleanup state after verification. Use `--failpoint branch_pushed`, `--failpoints branch_pushed,evidence_comment_published`, or repeated `--failpoint` flags to run a smaller matrix. Use `--cleanup-state StateName` to choose the Linear terminal cleanup state, or `--keep` to retain the external artifacts for inspection.
 
+The release gate wraps local verification and optional live readiness/canary checks into one operator decision point. By default it requires a clean worktree, is local-only, and writes `.takt/release-gate/latest.json`:
+
+```bash
+pnpm release:gate
+```
+
+Enable non-mutating live readiness with `--live` or `TAKT_RELEASE_LIVE=1`. Enable the mutating publication canary with `--canary` or `TAKT_RELEASE_CANARY=1`; this runs the low-cost `branch_pushed` failpoint and then verifies that the PR is closed, its branch is deleted, and the Linear canary issue is terminal. Use `--full-canary` or `TAKT_RELEASE_FULL_CANARY=1` before a serious release to run the full seven-failpoint matrix.
+
+```bash
+TAKT_RELEASE_LIVE=1 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm release:gate -- ./examples/WORKFLOW.md
+TAKT_RELEASE_LIVE=1 TAKT_RELEASE_CANARY=1 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm release:gate -- ./examples/WORKFLOW.md
+TAKT_RELEASE_LIVE=1 TAKT_RELEASE_FULL_CANARY=1 LINEAR_API_KEY=... GITHUB_TOKEN=... pnpm release:gate -- ./examples/WORKFLOW.md
+```
+
+Use `--json` for machine-readable stdout, `--report path` to choose the report file, `--no-report` for dry reporting, and `--skip-verify` only when a prior `pnpm verify` result is already attached to the release decision. Use `--allow-dirty` only for development checks; production release decisions should use the default clean-worktree requirement so the report's commit SHA identifies the exact tested code.
+
 Live runs performed during May 15-17, 2026:
 
 - Linear project: `Takt` (`5f14e4e68dc4`).
@@ -158,6 +174,7 @@ Live runs performed during May 15-17, 2026:
 - `SAM-92` through `SAM-98`, `Live publication ledger canary <failpoint>`: real matrix canary covered `branch_pushed`, `pull_request_published`, `evidence_artifact_uploaded`, `evidence_comment_published`, `linear_comment_posted`, `review_state_started`, and `review_state_reconciled`. Each case reconciled from the durable publication transaction, published evidence, posted or recovered the Linear PR comment, and reached `Needs Human`. The run created draft PRs #8 through #14 and then closed those PRs and deleted their `takt-canary/*` branches. It exposed that cleanup must choose a terminal state that exists in the Linear team workflow, not just the first configured terminal-state name.
 - `SAM-99` and `SAM-100`, `Live publication ledger canary branch_pushed`: reran the branch-push failpoint after cleanup-state discovery was added and after normal cleanup failures were made fatal. The canary selected the actual `Canceled` workflow state, reconciled PRs #15 and #16, closed the draft PRs, deleted their `takt-canary/*` branches, and moved the Linear issues to `Canceled`.
 - `SAM-101` through `SAM-107`, `Live publication ledger canary <failpoint>`: reran the full real failpoint matrix after cleanup-state discovery and fatal cleanup handling. The run reconciled all seven crash points, created draft PRs #17 through #23, posted sticky evidence comments, closed all seven PRs, deleted their `takt-canary/*` branches, and moved all seven Linear canary issues to `Canceled`.
+- `SAM-108` and `SAM-109`, `Release gate branch_pushed canary`: real `pnpm release:gate -- --allow-dirty --skip-verify --live --canary --no-report ./examples/WORKFLOW.md` ran non-mutating live readiness, ran the low-cost mutating `branch_pushed` publication canary, reconciled PRs #24 and #25, closed the PRs, deleted their `takt-canary/*` branches, and verified the Linear issues reached `Canceled`.
 
 Before production use:
 
@@ -174,4 +191,5 @@ Before production use:
 - `pnpm test:factory`: runs only the toy web-app production-factory harness.
 - `pnpm toy:typecheck`: typechecks the toy frontend/backend fixture.
 - `pnpm integration:live`: reports a skipped real-integration profile by default; with `TAKT_LIVE_INTEGRATION=1`, performs non-mutating live Linear/GitHub readiness checks.
+- `pnpm release:gate`: runs the local release gate and writes `.takt/release-gate/latest.json`; with `TAKT_RELEASE_LIVE=1`, performs non-mutating live readiness checks; with `TAKT_RELEASE_CANARY=1` or `TAKT_RELEASE_FULL_CANARY=1`, performs and verifies mutating publication canaries.
 - `pnpm verify`: runs the full local gate used by CI.
