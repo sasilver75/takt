@@ -1,0 +1,65 @@
+Takt handoff: agent and framework observability
+
+Current state
+- Branch: main, aligned with origin/main at last check.
+- Recent completed work:
+  - Crash-consistent PR publication ledger and restart reconciliation.
+  - Live publication canary matrix for crash points across branch push, PR create/update, evidence publication, Linear PR comment, and review-state transition.
+  - Release gate runner with verify, live readiness, and optional mutating canary checks.
+- Release gate and canary tests were run against real GitHub/Linear side effects and cleaned up their generated PRs/issues.
+
+Problem to solve next
+Takt is becoming durable enough to leave running, but the operator still needs better visibility into both:
+- Takt itself: lifecycle state, queue health, publication/retry/reconciliation history, canary/release gate status, and framework errors.
+- The agents running inside Takt: what prompt/context they received, which tools or commands they ran, what they emitted, what failed, token/cost usage, artifacts produced, and the final handoff.
+
+Important boundary
+Do not try to expose private chain-of-thought. The useful product is an auditable trace of observable agent activity: prompts, messages, tool calls, command output, model/provider metadata, errors, artifacts, and summaries.
+
+Research conclusion
+Build Takt's own local trace model and dashboard as the source of truth, but shape it so it can map cleanly to existing agent observability standards and tools.
+
+Useful references and ecosystems:
+- OpenTelemetry GenAI semantic conventions, including agent spans.
+- OpenInference trace conventions from Arize/Phoenix.
+- Phoenix, Langfuse, Braintrust, Helicone, OpenAI Agents SDK tracing, and Vercel AI SDK telemetry.
+
+Recommendation
+Do not make Takt depend on a hosted observability vendor for its core operator workflow. Add a local first-party trace store and dashboard view first. Later, optionally export the same trace events via OTLP/OpenInference-compatible spans so operators can plug in Phoenix, Langfuse, Braintrust, or their existing telemetry stack.
+
+Concrete next goal
+Build an operator trace view that ties each issue run attempt to the underlying Codex session/activity: prompts, tool calls, command outputs, token usage, final worker handoff, errors, and produced artifacts, while preserving Takt's lifecycle timeline.
+
+Suggested first implementation slice
+1. Add a typed AgentTraceEvent model with fields that can map to OTel/OpenInference concepts:
+   - trace_id, span_id, parent_span_id
+   - issue identifier
+   - run attempt id
+   - agent/session id
+   - timestamp
+   - event kind
+   - message/tool/command payload
+   - token usage
+   - error details
+   - artifact links
+2. Persist trace events locally, likely as JSONL per issue run attempt under .takt, with truncation/redaction rules for large or sensitive payloads.
+3. Capture Codex app-server events in the agent runner/runtime and append normalized trace events.
+4. Expose a read API for issue/run traces.
+5. Add a dashboard "Agent Trace" view or tab for a selected issue/run:
+   - timeline
+   - prompts/messages
+   - tool calls and command output
+   - errors
+   - token usage
+   - artifacts and final handoff
+6. Add deterministic tests for ordering, persistence across restart, redaction/truncation, API shape, and dashboard rendering.
+
+Likely files to inspect first
+- src/agent/runner.ts
+- src/runtime/workerRuntime.ts
+- src/orchestrator/orchestrator.ts
+- dashboard/API server code under src/http or equivalent
+- existing tests around agent runner, orchestrator issue snapshots, and dashboard/API routes
+
+Useful implementation principle
+Start with the trace contract and persistence, then wire in capture points, then the API, then the UI. That keeps the data model stable and makes the dashboard a consumer rather than the place where observability logic lives.
